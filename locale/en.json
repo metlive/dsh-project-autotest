@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Automation Testing Workbench",
+    "description": "A sidebar \u201cAutomation testing\u201d workbench: switch the project under test by workspace and drive it through the seven stages (requirements, plan, cases, environment, scripts, results, bug tracking). Cases are split into positive and negative, and export to XMind, TestLink XML, CSV or Markdown in one click. Data is stored per workspace on this machine, so it survives refreshes. Each session row also offers a shortcut to test its project."
+  }
+}

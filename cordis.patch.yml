@@ -1,0 +1,14 @@
+# dsh-project-autotest bundle patch
+#
+# One row: the plugin package itself. The Host half is intentionally empty
+# (`export function apply() {}`) — this plugin is a pure Client-side page, so it
+# needs no webserver route, no storage service and no agent tool.
+#
+# The browser artifact (`lib/client.js`) declares `dsh.client` in package.json,
+# which is what makes the Web shell load it into the page. It registers into
+# `sidebar.panellist` (the always-mounted left column) and `main` (the central
+# panel dispatched by the selected sidebar id).
+- insert:
+    - id: project-autotest
+      name: 'dsh-project-autotest'
+      config: {}
