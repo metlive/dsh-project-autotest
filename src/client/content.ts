@@ -71,7 +71,7 @@ export const zhContent: FlowContent = {
     {
       id: 'step-requirement',
       number: 1,
-      title: '产品文档 / 技术方案',
+      title: '产品文档/技术方案',
       summary: '流程的起点：把产品需求文档和技术方案放进工作区，让被测系统「测什么」有唯一出处。',
       input: '产品需求文档、技术方案 / 设计文档、版本规划',
       output: '需求基线：功能点清单、优先级、覆盖率目标、自动化粒度',
@@ -92,7 +92,7 @@ export const zhContent: FlowContent = {
     {
       id: 'step-cases',
       number: 2,
-      title: '设计测试用例',
+      title: '设计测试用例或导入',
       summary: '人工最核心的一步：把功能点翻译成可执行、可自动化的用例，正向优先，反向靠分析筛出来。',
       input: '需求基线、产品文档与技术方案',
       output: '可执行的用例集：前置条件、操作步骤、预期结果、设计方法',
@@ -113,7 +113,7 @@ export const zhContent: FlowContent = {
     {
       id: 'step-execution',
       number: 3,
-      title: '编写并执行测试脚本（模型自动）',
+      title: '编写并执行测试脚本',
       summary: '模型根据用例自动写脚本、跑脚本并把结果汇报回来；人工不需要写代码，只评审结果。',
       input: '测试用例集、被测系统与可用的测试环境',
       output: '自动化测试脚本、执行结果（每条用例通过 / 失败）、失败记录',
@@ -131,7 +131,7 @@ export const zhContent: FlowContent = {
     {
       id: 'step-bugs',
       number: 4,
-      title: '跟踪测试 Bug',
+      title: '跟踪测试Bug',
       summary: '模型给出失败结论并归因，人工确认是产品缺陷后提单，修复后回归闭环。',
       input: '执行结果、失败日志与模型给出的归因',
       output: '闭环的缺陷（已修复并回归通过）、与需求保持一致的用例与脚本',

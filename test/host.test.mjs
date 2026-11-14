@@ -708,13 +708,17 @@ test('a legacy seven-stage document migrates instead of losing stages', async ()
   assert.equal(saved.status, 200)
   const steps = saved.envelope.value.project.steps
   assert.deepEqual(Object.keys(steps).sort(), ['bugs', 'cases', 'execution', 'requirement'])
-  assert.equal(steps.requirement.status, 'done', 'the furthest-progressed folded record wins')
+  // The migration keeps the NOTES (the human record). The status is no longer
+  // taken from the document: saveProject derives it from the work, so the
+  // stored value must agree with the data rather than with the legacy button.
   assert.match(steps.requirement.note, /需求已拆解/)
   assert.match(steps.requirement.note, /排期 3 天/, 'both prior notes survive')
-  assert.equal(steps.requirement.updatedAt, 9, 'the latest timestamp wins')
-  assert.equal(steps.execution.status, 'done')
   assert.match(steps.execution.note, /已部署测试服/)
   assert.match(steps.execution.note, /写了 4 条脚本/)
+  // One case with no expected result: cases is in progress, nothing has run.
+  assert.equal(steps.cases.status, 'doing', 'derived: cases exist but have no expected result')
+  assert.equal(steps.execution.status, 'todo', 'derived: nothing has been executed')
+  assert.equal(steps.requirement.status, 'done', 'derived: the input exists and cases were designed')
   assert.equal(saved.envelope.value.project.cases.length, 1, 'cases are untouched by the migration')
 })
 
@@ -741,7 +745,74 @@ test('requirement documents are stored in the workspace and can be listed and re
   assert.equal(statSync(join(dir, 'prd.md'), { throwIfNoEntry: false }), undefined)
 })
 
+
+test('the run route hands the agent a real task in the workspace conversation', async () => {
+  // A run is the ONE acting route: it appends a user message to the live
+  // session bound to this workspace, which is what makes the model execute.
+  const appended = []
+  const session = (id, cwd) => ({ id, cwd, append: (type, data, options) => appended.push({ id, type, data, options }) })
+  const sessions = {
+    list: () => [session('s-elsewhere', '/somewhere/else'), session('s-this', WS_ALPHA_PATH)],
+    get: (id) => (id === 's-this' ? session('s-this', WS_ALPHA_PATH) : id === 's-elsewhere' ? session('s-elsewhere', '/somewhere/else') : undefined),
+  }
+  const runCtx = {
+    effect(callback) { callback() },
+    get(name) {
+      if (name === 'workspaceRegistry') return { list: () => WORKSPACES, get: (id) => WORKSPACES.find((entry) => entry.id === id) }
+      if (name === 'sessions') return sessions
+      return undefined
+    },
+  }
+  const runApi = mod.createApi(runCtx)
+  const result = await call(runApi, 'run', { workspaceId: 'ws-alpha', locale: 'zh' })
+  assert.equal(result.status, 200, JSON.stringify(result.envelope))
+  assert.equal(result.envelope.value.sessionId, 's-this', 'the run goes to the conversation opened on THIS workspace')
+  assert.equal(appended.length, 1)
+  assert.equal(appended[0].type, 'user/message')
+  assert.equal(appended[0].options.surfaceOp, 'append')
+  assert.equal(appended[0].data.source.kind, 'user')
+  const text = appended[0].data.content[0].text
+  assert.match(text, /正常登录|2 条用例/, 'the prompt names the project and its cases')
+  assert.ok(text.includes(projectFileOf(WS_ALPHA_PATH)), 'the agent is told where the project file is')
+  assert.match(text, /save/, 'and how to write the verdicts back')
+
+  // An explicit session id wins; an unknown one falls back to the workspace.
+  const explicit = await call(runApi, 'run', { workspaceId: 'ws-alpha', sessionId: 's-elsewhere' })
+  assert.equal(explicit.envelope.value.sessionId, 's-elsewhere')
+  const bogus = await call(runApi, 'run', { workspaceId: 'ws-alpha', sessionId: 'nope' })
+  assert.equal(bogus.envelope.value.sessionId, 's-this')
+})
+
+test('a run with no cases, no session store, or a foreign origin is refused', async () => {
+  // A session store with exactly one live session, so "no cases" is the only
+  // reason a run can be refused below.
+  const live = (id, cwd) => ({ id, cwd, append() {} })
+  const ctxWith = (sessions) => ({
+    effect(callback) { callback() },
+    get(name) {
+      if (name === 'workspaceRegistry') return { list: () => WORKSPACES, get: (id) => WORKSPACES.find((entry) => entry.id === id) }
+      if (name === 'sessions') return sessions
+      return undefined
+    },
+  })
+  WORKSPACES.push({ id: 'ws-runempty', path: join(HOME, 'projects', 'runempty'), title: 'runempty', sessionIds: [] })
+  await call(api, 'save', { workspaceId: 'ws-runempty', project: { cases: [] } })
+  const empty = await call(mod.createApi(ctxWith({ list: () => [live('s1', WS_ALPHA_PATH)], get: (id) => (id === 's1' ? live('s1', WS_ALPHA_PATH) : undefined) })), 'run', { workspaceId: 'ws-runempty' })
+  assert.equal(empty.status, 400)
+  assert.match(empty.envelope.error.message, /no cases/i)
+
+  const orphan = await call(mod.createApi(ctxWith(undefined)), 'run', { workspaceId: 'ws-alpha' })
+  assert.equal(orphan.status, 503)
+  assert.match(orphan.envelope.error.message, /session/i)
+
+  // An opaque origin (`null`) is a sandboxed/foreign page: it must not be able
+  // to make the agent run anything.
+  const opaque = await call(api, 'run', { workspaceId: 'ws-alpha' }, { origin: 'null' })
+  assert.equal(opaque.status, 403)
+})
+
 // --- Teardown / runner --------------------------------------------------
+
 
 let passed = 0
 const failures = []

@@ -2,7 +2,7 @@
  * The left rail of the workbench: the seven pipeline stages, each showing its
  * completion state, plus the project's coverage facts above them.
  *
- * It is presentational only — the workbench owns the selection and the status,
+ * It is presentational only — the workbench owns the selection and derives the statuses,
  * and this component receives both plus the click handler. That keeps the rail
  * usable in a narrow column without its own state.
  *
@@ -14,8 +14,10 @@ import type { Translate } from './locales.ts'
 
 /** Props the workbench hands the rail. */
 export interface StepRailProps {
-  /** The active workspace's project, for statuses and counts. */
+  /** The active workspace's project, for counts. */
   project: ProjectState
+  /** The DERIVED stage statuses (never the stored ones, which go stale). */
+  status: Record<StepId, StepStatus>
   /** The stage currently shown. */
   active: StepId
   /** Namespace-bound translator. */
@@ -26,8 +28,13 @@ export interface StepRailProps {
   onSelect: (id: StepId) => void
 }
 
-/** The status glyph: a filled circle for done, a ring for doing, a dot for todo. */
-function StatusDot({ status }: { status: StepStatus }): ReactNode {
+/**
+ * The status glyph: a filled circle for done, a ring for doing, a dot for todo.
+ *
+ * Exported because the stage head shows the same derived status as a pill, and
+ * two glyphs for one status that could drift apart would be a bug waiting.
+ */
+export function StatusDot({ status }: { status: StepStatus }): ReactNode {
   return h('span', {
     className: `dpat-status dpat-status-${status}`,
     'aria-hidden': 'true',
@@ -39,7 +46,7 @@ function StatusDot({ status }: { status: StepStatus }): ReactNode {
  * @param props - the project, the selection, the copy and the handler.
  * @returns the rail element.
  */
-export function StepRail({ project, active, t, titles, onSelect }: StepRailProps): ReactNode {
+export function StepRail({ project, status, active, t, titles, onSelect }: StepRailProps): ReactNode {
   return h(
     'nav',
     { className: 'dpat-rail', 'aria-label': t('page.allSteps') },
@@ -69,7 +76,7 @@ export function StepRail({ project, active, t, titles, onSelect }: StepRailProps
             },
             h('span', { className: 'dpat-railIndex', 'aria-hidden': 'true' }, String(index + 1)),
             h('span', { className: 'dpat-railTitle' }, titles[id]),
-            h(StatusDot, { status: project.steps[id].status }),
+            h(StatusDot, { status: status[id] }),
           ),
         ),
       ),

@@ -1,7 +1,7 @@
 {
   "name": "dsh-project-autotest",
   "version": "1.0.0",
-  "description": "DSH 插件：左侧栏「自动化测试流程」工作台 —— 按工作区切换项目，按自动化测试七步（需求→计划→用例→环境→脚本→结果→Bug）管理测试项目，用例可导出 XMind 思维导图 / TestLink XML / CSV / Markdown；数据按工作区持久化在 $DSH_HOME/storages 下。",
+  "description": "DSH 插件：左侧栏「自动化测试」工作台 —— 按工作区切换项目，按自动化测试七步（需求→计划→用例→环境→脚本→结果→Bug）管理测试项目，用例可导出 XMind 思维导图 / TestLink XML / CSV / Markdown；数据按工作区持久化在 $DSH_HOME/storages 下。",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

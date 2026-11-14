@@ -27,6 +27,7 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  deriveStageStatus,
   makeId,
   projectProgress,
   splitCases,
@@ -46,11 +47,11 @@ import {
   type TestCase,
 } from '../wire.ts'
 import { CONTENT_STEP_TO_STAGE, contentFor } from './content.ts'
-import { StepRail } from './StepRail.tsx'
+import { StatusDot, StepRail } from './StepRail.tsx'
 import { flowPipeline } from './figures.tsx'
 import { FlowIcon } from './FlowIcon.tsx'
 import type { Translate } from './locales.ts'
-import { downloadArtifact, exportProject, hostBuild, listWorkspaces, loadProject, saveProject, type ImportPreview } from './api.ts'
+import { downloadArtifact, exportProject, hostBuild, listDocuments, listWorkspaces, loadProject, saveProject, startRun, type DocumentInput, type ImportPreview, type RunStart } from './api.ts'
 import { ImportPanel, type ImportMode } from './ImportPanel.tsx'
 import { DocumentsPanel } from './DocumentsPanel.tsx'
 import { toTestCase } from '../importers.ts'
@@ -218,6 +219,9 @@ export function Workbench(props: WorkbenchProps): ReactNode {
   /** The Host half's build stamp, or null when it never loaded this plugin. */
   const [hostStamp, setHostStamp] = useState<string | null>(null)
   const [hostReachable, setHostReachable] = useState(true)
+  const [runState, setRunState] = useState<'idle' | 'starting' | RunStart>('idle')
+  /** Requirement documents on disk, the only stage-① input the Host owns. */
+  const [requirementDocs, setRequirementDocs] = useState<DocumentInput[]>([])
 
   // The latest locale, read by the saver so the report follows the UI language
   // without making `persist` depend on it (which would rebuild every callback).
@@ -246,6 +250,9 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     try {
       const snapshot = await loadProject(id)
       setProject(snapshot.project)
+      // Stage ① is judged from the documents on disk, so fetch them with the
+      // project rather than waiting for the panel to mount.
+      void listDocuments(id).then(setRequirementDocs).catch(() => setRequirementDocs([]))
       setStoragePath(snapshot.storagePath)
       setSaved(snapshot.existed ? true : false)
       setActiveStep('requirement')
@@ -342,13 +349,6 @@ export function Workbench(props: WorkbenchProps): ReactNode {
       return next
     })
   }, [persist])
-
-  const setStepStatus = useCallback((id: StepId, status: StepStatus) => {
-    update((draft) => {
-      draft.steps[id] = { ...draft.steps[id], status, updatedAt: Date.now() }
-      return draft
-    })
-  }, [update])
 
   const setStepNote = useCallback((id: StepId, note: string) => {
     update((draft) => {
@@ -447,6 +447,36 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     setActiveStep('cases')
     setNotice(t('wb.importDone', { count: preview.cases.length }))
   }, [update, t])
+
+  /** Hand the cases to the agent: a real run, not a status flag. */
+  const runTests = useCallback(async () => {
+    if (workspaceId === null || project === null) return
+    setRunState('starting')
+    setNotice(null)
+    setError(null)
+    try {
+      // Save first: the agent reads the document from disk, so it must match
+      // the page exactly when the run starts.
+      if (!saved) await persist(project)
+      setRunState(await startRun(workspaceId, activeLocale))
+    } catch (cause) {
+      setRunState('idle')
+      setError((cause as Error).message)
+    }
+  }, [workspaceId, project, persist, saved, activeLocale])
+
+  /**
+   * The stage statuses, derived from the work — never chosen by hand.
+   *
+   * `stageStatus` is what the rail, the head and the report show; the stored
+   * `steps[*].status` is kept in the document only so an older reader still
+   * has a value, and it is refreshed from this derivation whenever the work
+   * changes.
+   */
+  const stageStatus = useMemo(
+    () => (project === null ? null : deriveStageStatus(project, { documents: requirementDocs.length, hasNote: false })),
+    [project, requirementDocs.length],
+  )
 
   const stageTitles = useMemo(() => {
     const titles = {} as Record<StepId, string>
@@ -666,6 +696,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
       return defectTracker()
     }
     if (modelRunsAlone) {
+      const runResult = runState === 'idle' || runState === 'starting' ? null : runState
       return h(
         'div',
         { className: 'dpat-stageBody' },
@@ -674,6 +705,37 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           { className: 'dpat-card dpat-modelCard', 'data-model-stage': activeStep },
           h('h4', { className: 'dpat-cardTitle' }, t('wb.modelRuns')),
           h('p', { className: 'dpat-stageSummary' }, t('wb.modelRunsHint')),
+          h(
+            'div',
+            { className: 'dpat-runBar' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dpat-btn dpat-btnPrimary dpat-runBtn',
+                'data-action': 'run-tests',
+                disabled: project === null || project.cases.length === 0 || runState === 'starting',
+                title: project !== null && project.cases.length === 0 ? t('wb.runNoCases') : t('wb.runStart'),
+                onClick: () => { void runTests() },
+              },
+              runState === 'starting' ? t('wb.runStarting') : `▶ ${t('wb.runStart')}`,
+            ),
+            h('span', { className: 'dpat-muted dpat-small' }, t('wb.runCases', { count: project === null ? 0 : project.cases.length })),
+          ),
+          runResult === null
+            ? null
+            : h(
+              'div',
+              { className: 'dpat-runResult', role: 'status', 'data-run-session': runResult.sessionId },
+              h('p', { className: 'dpat-hintOk' }, t('wb.runStarted', { count: runResult.cases })),
+              h('p', { className: 'dpat-muted dpat-small' }, t('wb.runWhere')),
+              h(
+                'details',
+                { className: 'dpat-runPrompt' },
+                h('summary', null, t('wb.runShowPrompt')),
+                h('pre', { className: 'dpat-pre' }, runResult.prompt),
+              ),
+            ),
           h(
             'ul',
             { className: 'dpat-list' },
@@ -718,24 +780,6 @@ export function Workbench(props: WorkbenchProps): ReactNode {
         'section',
         { className: 'dpat-card' },
         h('h4', { className: 'dpat-cardTitle' }, t('wb.stageNote')),
-        h(
-          'div',
-          { className: 'dpat-segmented', role: 'group', 'aria-label': t('wb.stageStatus') },
-          (['todo', 'doing', 'done'] as StepStatus[]).map((status) =>
-            h(
-              'button',
-              {
-                key: status,
-                type: 'button',
-                className: 'dpat-seg',
-                'data-status': status,
-                'aria-pressed': project.steps[activeStep].status === status,
-                onClick: () => setStepStatus(activeStep, status),
-              },
-              t(`wb.status.${status}`),
-            ),
-          ),
-        ),
         h(TextArea, {
           label: t('wb.stageNote'),
           value: project.steps[activeStep].note,
@@ -1046,7 +1090,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     ),
   )
 
-  const activeMeta = project.steps[activeStep]
+  const activeMeta = { status: (stageStatus ?? project.steps)[activeStep] }
 
   return h(
     'div',
@@ -1089,7 +1133,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     h(
       'div',
       { className: 'dpat-wbBody' },
-      h(StepRail, { project, active: activeStep, t, titles: stageTitles, onSelect: setActiveStep }),
+      h(StepRail, { project, status: stageStatus ?? project.steps, active: activeStep, t, titles: stageTitles, onSelect: setActiveStep }),
       h(
         'div',
         { className: 'dpat-wbStage' },
@@ -1098,12 +1142,18 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           { className: 'dpat-wbStageHead' },
           h('h3', { className: 'dpat-wbStageTitle' }, `${STEP_IDS.indexOf(activeStep) + 1}. ${stageTitles[activeStep]}`),
           ownerBadge,
-          h(Select<string>, {
-            label: t('wb.stageStatus'),
-            value: activeMeta.status,
-            options: (['todo', 'doing', 'done'] as StepStatus[]).map((status) => ({ value: status, label: t(`wb.status.${status}`) })),
-            onChange: (status) => setStepStatus(activeStep, status as StepStatus),
-          }),
+          // Status is DERIVED from the work: shown, not chosen. The tooltip
+          // says what would advance it, so the pill is an explanation.
+          h(
+            'span',
+            {
+              className: `dpat-stageStatus dpat-stageStatus-${activeMeta.status}`,
+              'data-stage-status': activeMeta.status,
+              title: t(`wb.statusWhy.${activeStep}.${activeMeta.status}`),
+            },
+            h(StatusDot, { status: activeMeta.status }),
+            t(`wb.status.${activeMeta.status}`),
+          ),
           h('span', { className: 'dpat-muted dpat-small' }, `${casesById.size} ${t('wb.cases')}`),
         ),
         stageBody,

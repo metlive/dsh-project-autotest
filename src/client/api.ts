@@ -242,3 +242,24 @@ export async function deleteDocument(workspaceId: string, name: string): Promise
   const value = await call<{ documents: DocumentInput[] }>('documentDelete', { workspaceId, filename: name })
   return value.documents
 }
+
+/** What a started run reports back. */
+export interface RunStart {
+  /** The conversation the run was handed to. */
+  sessionId: string
+  /** Cases the run covers. */
+  cases: number
+  /** The task the agent received (shown so the user can see exactly what ran). */
+  prompt: string
+}
+
+/**
+ * Hand the current cases to the agent as a real test run.
+ * @param workspaceId - the project to run.
+ * @param locale - the instruction language.
+ * @param sessionId - the conversation the page is showing, when known.
+ * @returns the run facts the page displays.
+ */
+export function startRun(workspaceId: string, locale: string, sessionId?: string): Promise<RunStart> {
+  return call<RunStart>('run', { workspaceId, locale, ...(sessionId === undefined ? {} : { sessionId }) })
+}

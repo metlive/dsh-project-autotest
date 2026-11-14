@@ -26,7 +26,7 @@ const STAGE: Record<'zh' | 'en', Record<StepId, string>> = {
   zh: {
     requirement: '产品文档 / 技术方案',
     cases: '设计测试用例',
-    execution: '编写并执行测试脚本（模型自动）',
+    execution: '编写并执行测试脚本',
     bugs: '跟踪测试 Bug',
   },
   en: {
@@ -61,11 +61,15 @@ const GLYPH: Record<string, string> = { done: '✅', doing: '🟡', todo: '⬜',
  * @param localeId - the locale id; anything not starting with `zh` renders English.
  * @returns the markdown body.
  */
-export function renderReport(project: ProjectState, localeId: string): string {
+export function renderReport(project: ProjectState, localeId: string, requirementDocs = 0): string {
   const lang = reportLanguage(localeId)
   const t = lang === 'zh'
   const stages = STAGE[lang]
-  const progress = projectProgress(project)
+  // The report shows DERIVED status, the same facts the page shows: a stored
+  // status a person forgot to move would otherwise contradict the work.
+  const statuses = deriveStageStatus(project, { documents: requirementDocs, hasNote: false })
+  const withStatus: ProjectState = { ...project, steps: Object.fromEntries(STEP_IDS.map((id) => [id, { ...project.steps[id], status: statuses[id] }])) as ProjectState['steps'] }
+  const progress = projectProgress(withStatus)
   const buckets = splitCases(project.cases)
   const casesById = new Map(project.cases.map((item) => [item.id, item]))
   const verified = project.cases.filter((item) => item.selfCheck.passOnGood && item.selfCheck.failOnBad).length
@@ -125,7 +129,7 @@ export function renderReport(project: ProjectState, localeId: string): string {
   lines.push(t ? '| # | 阶段 | 状态 | 备注 |' : '| # | Stage | Status | Note |')
   lines.push('|---|---|---|---|')
   STEP_IDS.forEach((id, index) => {
-    const step = project.steps[id]
+    const step = withStatus.steps[id]
     const label = t ? { todo: '未开始', doing: '进行中', done: '已完成' }[step.status] : { todo: 'to do', doing: 'in progress', done: 'done' }[step.status]
     lines.push(`| ${index + 1} | ${stages[id]} | ${GLYPH[step.status] ?? ''} ${label} | ${cell(step.note)} |`)
   })
@@ -186,7 +190,7 @@ export function renderReport(project: ProjectState, localeId: string): string {
   lines.push('')
   // Stage progress is CONTEXT, not a finding: it is printed separately so the
   // ✅ verdict below speaks only about the test assets.
-  const pendingStages = STEP_IDS.filter((id) => project.steps[id].status !== 'done').map((id) => stages[id])
+  const pendingStages = STEP_IDS.filter((id) => withStatus.steps[id].status !== 'done').map((id) => stages[id])
   const open: string[] = []
   if (unverified.length > 0) {
     open.push(t

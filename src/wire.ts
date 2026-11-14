@@ -373,6 +373,69 @@ export function normalizeProject(raw: unknown, workspaceId: string): ProjectStat
   return project
 }
 
+/**
+ * What each workspace document contributes to stage ①.
+ *
+ * The stage cannot be judged from the project document alone: the requirement
+ * documents it consumes live on disk, so the Host passes what it found. The
+ * browser bundle (which never touches the disk) leaves it out.
+ */
+export interface RequirementInputs {
+  /** How many requirement documents are stored for the workspace. */
+  documents: number
+  /** Whether the requirement stage carries a written note. */
+  hasNote: boolean
+}
+
+/**
+ * Derive every stage's status from the work itself.
+ *
+ * The four stages have a fixed order and each one's completion is a plain fact
+ * about the data, so asking a person to move a status selector is busywork
+ * that goes stale the moment they forget. The rules, in pipeline order:
+ *
+ * - ① requirement — needs at least one stored document (or a written note), and
+ *   is done once there are cases to design from;
+ * - ② cases — has at least one case, and is done once every case has an
+ *   expected result (a case without one cannot be judged);
+ * - ③ execution — doing when cases exist, done once every case has run;
+ * - ④ bugs — done when every logged defect is closed (and there is one to close).
+ *
+ * The returned record is what the rail, the stage head and the report show; it
+ * is never persisted, so it cannot drift from the data.
+ * @param project - the project document.
+ * @param requirements - the stage-① inputs, when the caller can see them.
+ * @returns one status per stage.
+ */
+export function deriveStageStatus(project: ProjectState, requirements?: RequirementInputs): Record<StepId, StepStatus> {
+  const cases = project.cases
+  const status = {} as Record<StepId, StepStatus>
+  const hasNote = requirements?.hasNote === true || project.steps.requirement.note.trim() !== ''
+  const hasDocs = (requirements?.documents ?? 0) > 0
+
+  const casesReady = cases.length > 0 && cases.every((item) => item.expected.trim() !== '')
+  const ranCases = cases.filter((item) => item.result !== 'untested').length
+  const defectsClosed = project.defects.filter((item) => item.status === 'closed').length
+
+  // ① Input: nothing yet → todo; something to work from → doing; cases derived.
+  status.requirement = !hasDocs && !hasNote ? 'todo' : cases.length === 0 ? 'doing' : 'done'
+
+  // ② Craft: cases exist; complete once each can be judged.
+  status.cases = cases.length === 0 ? 'todo' : casesReady ? 'done' : 'doing'
+
+  // ③ Run: the model's turn; complete once every case has a verdict.
+  status.execution = cases.length === 0 || ranCases === 0 ? 'todo' : ranCases === cases.length ? 'done' : 'doing'
+
+  // ④ Loop: only starts once something failed; ends when all are closed.
+  const failed = cases.some((item) => item.result === 'failed')
+  status.bugs = !failed && project.defects.length === 0
+    ? 'todo'
+    : project.defects.length > 0 && defectsClosed === project.defects.length
+      ? 'done'
+      : 'doing'
+  return status
+}
+
 /** A one-line summary of where a project stands, used by the picker and header. */
 export function projectProgress(project: ProjectState): { done: number; total: number; percent: number } {
   const total = STEP_IDS.length

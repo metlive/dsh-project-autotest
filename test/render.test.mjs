@@ -188,6 +188,76 @@ test('the workbench renders its loading paint through real React without throwin
   assert.ok(html.includes('正在读取工作区'), 'the first paint is the loading state')
 })
 
+test('stage status is derived from the work, never chosen', async () => {
+  // The four stages advance themselves. This drives deriveStageStatus through
+  // the built CLIENT bundle (the module is shared by both halves) and walks a
+  // project from empty to finished.
+  const bundle = readFileSync(join(ROOT, 'lib', 'client.js'), 'utf8')
+  const start = bundle.indexOf('function deriveStageStatus')
+  assert.ok(start > 0, 'deriveStageStatus is bundled for the page')
+  const body = bundle.slice(start, bundle.indexOf('\n\t\t\t}', start) + 5)
+  const derive = new Function(`${body}; return deriveStageStatus;`)()
+  const project = (over) => ({
+    version: 1, workspaceId: 'w', title: 't', path: '/p', coverageTarget: 80, automationLevel: 'api',
+    steps: { requirement: { status: 'todo', note: '', updatedAt: 0 }, cases: { status: 'todo', note: '', updatedAt: 0 },
+             execution: { status: 'todo', note: '', updatedAt: 0 }, bugs: { status: 'todo', note: '', updatedAt: 0 } },
+    cases: [], defects: [], createdAt: 0, updatedAt: 0, ...over,
+  })
+  const one = (over) => ({ id: 'c1', title: 'a', kind: 'positive', technique: 'functional', preconditions: '', steps: ['s'], expected: '', result: 'untested', failReason: 'none', selfCheck: { passOnGood: false, failOnBad: false }, note: '', ...over })
+
+  // ① Input
+  assert.equal(derive(project(), { documents: 0 }).requirement, 'todo', 'no docs, no note → todo')
+  assert.equal(derive(project(), { documents: 1 }).requirement, 'doing', 'a document starts the stage')
+  assert.equal(derive(project({ cases: [one({ expected: 'ok' })] }), { documents: 1 }).requirement, 'done', 'documented and turned into cases')
+  assert.equal(derive(project({ steps: { ...project().steps, requirement: { status: 'todo', note: '手写需求', updatedAt: 1 } } }), { documents: 0 }).requirement, 'doing', 'a written note counts as input')
+
+  // ② Cases
+  assert.equal(derive(project()).cases, 'todo')
+  assert.equal(derive(project({ cases: [one()] })).cases, 'doing', 'a case without an expected result is unfinished')
+  assert.equal(derive(project({ cases: [one({ expected: '进入首页' })] })).cases, 'done')
+
+  // ③ Execution
+  assert.equal(derive(project({ cases: [one({ expected: 'x' })] })).execution, 'todo', 'nothing ran yet')
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'passed' })] })).execution, 'done')
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'failed' })] })).execution, 'done', 'a failed run is still a run')
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'passed' }), one({ id: 'c2', expected: 'y' })] })).execution, 'doing', 'half executed')
+
+  // ④ Bugs
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'passed' })] })).bugs, 'todo', 'no failure, no defect')
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'failed' })] })).bugs, 'doing', 'a failure opens the loop')
+  const defect = (status) => ({ id: 'd1', title: 'bug', status, caseId: 'c1', note: '', regression: 'pending', requirementChanged: false, createdAt: 0 })
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'failed' })], defects: [defect('closed')] })).bugs, 'done', 'all defects closed')
+  assert.equal(derive(project({ cases: [one({ expected: 'x', result: 'failed' })], defects: [defect('open')] })).bugs, 'doing')
+})
+
+test('single-flow stages span the full width so they align with their heading', () => {
+  // Regression: under the wide two-column stage grid the case editor's two
+  // buckets became grid cells, so the negative bucket started a whole column
+  // away from the heading and the editor looked misaligned. Every child of a
+  // one-column stage must opt out of the grid explicitly.
+  const styles = readFileSync(join(ROOT, 'src', 'client', 'styles.ts'), 'utf8')
+  const grid = /\.dpat-stageBody > [^{]*\{ grid-column: 1 \/ -1; \}/.exec(styles)
+  assert.ok(grid !== null, 'the wide-screen grid has a full-width escape hatch')
+  for (const selector of ['.dpat-bucket', '.dpat-caseList', '.dpat-stageLead', '.dpat-import']) {
+    assert.ok(grid[0].includes(selector), `${selector} must span the stage width`)
+  }
+  // And the editor keeps a readable measure instead of stretching to the window.
+  assert.match(styles, /\.dpat-caseList \{[^}]*max-width: 1100px/, 'case cards keep a readable width')
+})
+
+test('the layout leaves the stage body uncapped and widens the rail', () => {
+  // Regression for a layout change that silently dropped the `contentFor`
+  // export while rewriting the stylesheet-adjacent module: the workbench must
+  // still resolve its content, and the two dimensions the user asked for are
+  // pinned here so a later edit cannot quietly restore the 900px cap.
+  const styles = readFileSync(join(ROOT, 'src', 'client', 'styles.ts'), 'utf8')
+  assert.doesNotMatch(styles, /max-width:\s*900px/, 'the stage body must not be capped at 900px')
+  assert.match(styles, /minmax\(0, 260px\)/, 'the left rail is 260px (was 210)')
+  const content = readFileSync(join(ROOT, 'src', 'client', 'content.ts'), 'utf8')
+  assert.match(content, /export function contentFor\(localeId: string\): FlowContent/, 'contentFor stays typed and exported')
+  assert.match(content, /const CONTENT_BY_LOCALE/, 'its lookup table stays present')
+})
+
 test('zh and en dictionaries carry the same keys and no empty string', () => {
   const source = readFileSync(join(ROOT, 'src', 'client', 'locales.ts'), 'utf8')
   const read = (name) => {

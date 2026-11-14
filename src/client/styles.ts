@@ -174,11 +174,14 @@ export const CSS = `
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
 .dpat-wbOverview { flex: none; padding: 10px 24px 12px; border-bottom: 0.5px solid var(--dpat-line); }
 .dpat-wbOverview .dpat-pipeline { margin: 0; }
+.dpat-wbOverview { max-width: none; }
 .dpat-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .dpat-progressLabel { font-size: 11.5px; color: var(--dpat-fg2); white-space: nowrap; }
 .dpat-progressBar { flex: 1; height: 5px; border-radius: 3px; background: var(--dpat-surface2); overflow: hidden; }
 .dpat-progressFill { display: block; height: 100%; background: var(--dpat-accent); border-radius: 3px; }
-.dpat-wbBody { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr); }
+.dpat-wbBody { flex: 1; min-height: 0; display: grid;
+  /* Left rail 260px (was 210) + 50: the stage names no longer truncate. */
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr); }
 .dpat-rail { border-right: 0.5px solid var(--dpat-line); padding: 12px 8px; overflow: auto; }
 .dpat-railMeta { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 10px 10px;
   border-bottom: 0.5px solid var(--dpat-line); margin-bottom: 8px; }
@@ -200,7 +203,7 @@ export const CSS = `
 .dpat-wbStage { min-height: 0; overflow: auto; padding: 16px 24px 40px; }
 .dpat-wbStageHead { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
 .dpat-wbStageTitle { margin: 0; font-size: 15px; font-weight: 600; }
-.dpat-stageBody { display: flex; flex-direction: column; gap: 12px; max-width: 900px; }
+.dpat-stageBody { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: none; }
 .dpat-stageLead { margin: 0; color: var(--dpat-fg2); font-size: 12.5px; }
 .dpat-stageSummary { margin: 0 0 10px; color: var(--dpat-fg); }
 .dpat-pitfallText { margin: 10px 0 0; padding: 8px 10px; font-size: 12.5px; border-radius: var(--dsw-radius-md, 8px);
@@ -217,6 +220,9 @@ export const CSS = `
 .dpat-bucketTitle { margin: 0; font-size: 13px; font-weight: 600; }
 .dpat-bucketHint { margin: 0; flex: 1; font-size: 12px; color: var(--dsw-alias-label-tertiary, var(--dpat-fg2)); }
 .dpat-caseList { display: flex; flex-direction: column; gap: 10px; }
+/* A case card holds a lot of prose; past ~1100px the line gets hard to scan,
+   so the list keeps a readable measure and stays flush left. */
+.dpat-caseList { max-width: 1100px; }
 .dpat-case { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 0.5px solid var(--dpat-line);
   border-radius: var(--dpat-radius); background: var(--dpat-surface); }
 .dpat-case[data-kind="negative"] { border-left: 3px solid var(--dsw-alias-state-warn-primary, #d97706); }
@@ -247,6 +253,26 @@ export const CSS = `
 .dpat-rowAction:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.14));
   color: var(--dsw-alias-label-primary, inherit); }
 .dpat-rowAction:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #4a9eff); outline-offset: 1px; }
+/* Two columns once the stage pane is wide enough: the width freed by lifting
+   the 900px cap goes to a second reading column rather than to longer lines. */
+@media (min-width: 1180px) {
+  .dpat-stageBody { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  /* A stage whose content is ONE reading flow (the case editor's two buckets,
+     the defect list) must span the full width as a single column: letting the
+     buckets become grid cells pushed the negative bucket into the right-hand
+     column, so the editor started a whole column away from its own heading. */
+  .dpat-stageBody > .dpat-stageLead,
+  .dpat-stageBody > .dpat-docs,
+  .dpat-stageBody > .dpat-analysisControls,
+  .dpat-stageBody > .dpat-modelCard,
+  .dpat-stageBody > .dpat-runResult,
+  .dpat-stageBody > .dpat-bucket,
+  .dpat-stageBody > .dpat-bucketHead,
+  .dpat-stageBody > .dpat-caseList,
+  .dpat-stageBody > .dpat-import { grid-column: 1 / -1; }
+  .dpat-importList { max-height: 320px; }
+}
+
 @media (max-width: 760px) {
   .dpat-wbBody { grid-template-columns: minmax(0, 1fr); }
   .dpat-rail { border-right: 0; border-bottom: 0.5px solid var(--dpat-line); max-height: 180px; }
@@ -301,7 +327,15 @@ export const CSS = `
 
 /* keep precedence: motion rule last */
 /* ---- who does the work: model / human markers ---- */
-.dpat-owner { display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px;
+/* flex: none matters: the stage head wraps, and a wrapping flex container
+   otherwise stretches a shrinkable inline-flex badge past its content. */
+/* Derived status: a pill that explains itself, never a control. */
+.dpat-stageStatus { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px;
+  border-radius: 999px; font-size: 11.5px; line-height: 18px; white-space: nowrap; cursor: help;
+  border: 0.5px solid var(--dpat-line2); color: var(--dpat-fg2); }
+.dpat-stageStatus-done { color: var(--dsw-alias-state-success-primary, #2a2); border-color: var(--dsw-alias-state-success-primary, #2a2); }
+.dpat-stageStatus-doing { color: var(--dsw-alias-state-warn-primary, #d97706); border-color: var(--dsw-alias-state-warn-primary, #d97706); }
+.dpat-owner { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px;
   font-size: 11.5px; line-height: 18px; white-space: nowrap; border: 0.5px solid var(--dpat-line2); color: var(--dpat-fg2); }
 .dpat-owner-human { color: var(--dsw-alias-brand-primary, #2563eb); border-color: var(--dsw-alias-brand-primary, #2563eb); }
 .dpat-owner-model { color: var(--dsw-alias-state-success-primary, #2a2); border-color: var(--dsw-alias-state-success-primary, #2a2); }
@@ -321,6 +355,16 @@ export const CSS = `
 .dpat-docIcon { flex: none; }
 .dpat-docMeta { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
 .dpat-docName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dpat-runBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0 4px; }
+.dpat-runBtn { height: 34px; padding: 0 18px; font-size: 13px; font-weight: 600; }
+.dpat-runResult { margin-top: 10px; padding: 10px 12px; border-radius: var(--dsw-radius-md, 8px);
+  border: 0.5px solid var(--dsw-alias-state-success-primary, #2a2);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2a2) 7%, transparent); }
+.dpat-runResult p { margin: 0 0 4px; }
+.dpat-runPrompt summary { cursor: pointer; font-size: 12px; color: var(--dpat-fg2); }
+.dpat-pre { margin: 8px 0 0; padding: 10px; max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word; border-radius: var(--dsw-radius-sm, 6px);
+  background: var(--dpat-surface2); border: 0.5px solid var(--dpat-line); }
 .dpat-modelCard { border-left: 3px solid var(--dsw-alias-state-success-primary, #2a2); }
 
 @media (prefers-reduced-motion: reduce) { .dpat-root *, .dpat-root *::before { transition: none !important; } }

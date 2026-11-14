@@ -32,7 +32,7 @@
  */
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { API_PREFIX, createProject, normalizeProject, type ExportFormat, type ProjectSnapshot, type WorkspaceSummary } from './wire.ts'
+import { API_PREFIX, createProject, deriveStageStatus, normalizeProject, STEP_IDS, type ExportFormat, type ProjectSnapshot, type WorkspaceSummary } from './wire.ts'
 import { renderExport } from './export.ts'
 import { renderReport } from './report.ts'
 import { importCases, ImportError, type ImportedCase, type ImportResult } from './importers.ts'
@@ -103,6 +103,44 @@ interface WorkspaceRegistryService {
   get?(id: string): WorkspaceEntityLike | undefined
 }
 
+/**
+ * The session store (`ctx.get('sessions')`) — the append-only event log every
+ * live conversation is built on.
+ *
+ * A "test run" is a real turn: the plugin appends a user message to the
+ * conversation that owns this project, and the agent loop picks it up and
+ * executes the cases exactly as if the person had typed the instruction. That
+ * is the only mechanism that makes the model actually WORK — a button that
+ * merely flips a status flag would be a lie.
+ *
+ * Shape verified against `@deepseek-ai/dsh-session`'s documented API
+ * (`create` / `get` / `list`); smaller surface than the real service on
+ * purpose, so the plugin depends on nothing it does not use.
+ */
+interface SessionAppendOptionsLike {
+  /** Surface events must state how they join the derived model history. */
+  surfaceOp: 'append'
+}
+
+interface SessionLike {
+  readonly id: string
+  /** Append one typed event; the shape below is `user/message`. */
+  append(type: 'user/message', data: {
+    role: 'user'
+    content: Array<{ type: 'text'; text: string }>
+    source: { kind: 'user' }
+  }, options: SessionAppendOptionsLike): unknown
+  /** The session's working directory, when the store exposes it. */
+  readonly cwd?: string
+  /** Messages derived for the model, used only to detect a busy agent. */
+  readonly deriveMessages?: () => ReadonlyArray<{ readonly role?: string }>
+}
+
+interface SessionServiceLike {
+  get?(id: string): SessionLike | undefined
+  list?(): SessionLike[]
+}
+
 /** The context this half is typed against. */
 interface HostContext {
   webServer: WebServerService
@@ -155,6 +193,10 @@ function isLoopbackHostname(hostname: string): boolean {
 /**
  * Decide whether one request may reach the routes: loopback (or a trusted)
  * Host header, and a same-origin `Origin` when the browser attached one.
+ *
+ * An opaque `Origin: null` (a sandboxed iframe, a `file:` page) is refused. It
+ * has no hostname, so comparing hostnames alone would have let it through — a
+ * page that is not this one must never be able to tell the agent to run.
  * @param request - the request headers.
  * @param trusted - non-loopback authorities this deployment serves.
  * @returns whether the request is trusted.
@@ -172,6 +214,7 @@ export function isTrustedRequest(request: PluginHttpRequest, trusted: readonly s
   if (header(request, 'sec-fetch-site') === 'cross-site') return false
   const origin = header(request, 'origin')
   if (origin === undefined) return true
+  if (origin === 'null') return false
   try {
     return new URL(origin).hostname === hostUrl.hostname
   } catch {
@@ -329,8 +372,14 @@ async function saveProject(project: ReturnType<typeof normalizeProject>, locale:
   const dir = autotestDir(project.path)
   await mkdir(dir, { recursive: true })
   const file = projectFile(project.path)
+  // The stage statuses are DERIVED from the work, never taken from the page:
+  // whatever a stale document claims is overwritten with the truth before it is
+  // written, so the stored document and the report always agree with the cases.
+  const documents = await listInputs(project.path)
+  const statuses = deriveStageStatus(project, { documents: documents.length, hasNote: false })
+  for (const id of STEP_IDS) project.steps[id] = { ...project.steps[id], status: statuses[id] }
   await writeAtomic(file, JSON.stringify(project, null, 2))
-  await writeAtomic(reportFile(project.path), renderReport(project, locale))
+  await writeAtomic(reportFile(project.path), renderReport(project, locale, documents.length))
   return file
 }
 
@@ -409,6 +458,8 @@ interface RequestBody {
   base64?: unknown
   /** Deterministic alternate for `base64`: the incoming request itself carries the file. */
   isRequest?: unknown
+  /** The conversation the page is showing, for the run route. */
+  sessionId?: unknown
 }
 
 /**
@@ -539,6 +590,102 @@ async function parseUpload(filename: string, body: RequestBody): Promise<ImportP
   throw Object.assign(new Error('the import needs a file: send "text" or "base64"'), { status: 400 })
 }
 
+
+/**
+ * The instruction one run hands to the agent.
+ *
+ * Written as a task, not a status flip: it names the case count, the project's
+ * own file, and the two things the agent must not do (invent results, file
+ * script problems as bugs). The agent then writes the scripts, runs them, and
+ * writes the verdicts back through the plugin's own `save` route — so the page
+ * reflects real execution rather than the click.
+ * @param project - the project the run covers.
+ * @param locale - the language the instruction is written in.
+ * @returns the prompt text.
+ */
+function runPrompt(project: ReturnType<typeof normalizeProject>, locale: string): string {
+  const cases = project.cases
+  const withId = cases.length > 0 && cases.every((item) => item.id !== '')
+  const lines = locale.toLowerCase().startsWith('zh')
+    ? [
+      `请执行「${project.title}」的自动化测试（共 ${cases.length} 条用例）。`,
+      '',
+      `1. 读取本工作区的测试项目：\`${projectFile(project.path)}\`（用例、前置条件、步骤与预期结果都在里面）。`,
+      '2. 根据用例编写自动化测试脚本（接口级优先），并实际执行；不要编造结果。',
+      '3. 把每条用例的「执行结果」（passed / failed / blocked / untested）与失败归因（product / script / environment）写回：',
+      withId
+        ? '   把修改后的完整文档 POST 到 /project-autotest/api/save，请求体 {"workspaceId": "' + project.workspaceId + '", "project": <文档>, "locale": "zh"}。'
+        : '   本项目没有自动化测试工作台可写的数据来源，请把执行结论整理成列表回报。',
+      '4. 失败的用例：先归因为产品缺陷，再考虑是否转为 Bug；脚本或环境问题请先修正脚本后重跑。',
+    ]
+    : [
+      `Run the automated tests for "${project.title}" (${cases.length} cases).`,
+      '',
+      `1. Read the test project at \`${projectFile(project.path)}\` (cases, preconditions, steps and expected results).`,
+      '2. Write the automated scripts (API level first) and actually execute them; never invent results.',
+      '3. Write each case\'s result (passed / failed / blocked / untested) and failure cause (product / script / environment) back:',
+      withId
+        ? '   POST the whole edited document to /project-autotest/api/save with body {"workspaceId": "' + project.workspaceId + '", "project": <document>, "locale": "en"}.'
+        : '   Report the verdicts as a list instead.',
+      '4. For failures: attribute them first; only product defects become bugs, and script or environment problems get fixed and re-run.',
+    ]
+  return lines.join('\n')
+}
+
+/**
+ * Hand one run to the agent that owns this project.
+ *
+ * The session is chosen by WORKSPACE, not by the caller: the plugin only runs
+ * tests inside a conversation the user has already opened (its cwd is the
+ * workspace), or the one the page explicitly names. A stale or foreign session
+ * id is refused rather than guessed at.
+ * @param ctx - the Host context.
+ * @param workspaceId - the project to run.
+ * @param facts - the workspace's registry facts.
+ * @param sessionId - the conversation the page is showing, when it knows it.
+ * @param locale - the instruction language.
+ * @returns what the page shows about the run.
+ */
+async function startRun(
+  ctx: HostContext,
+  workspaceId: string,
+  facts: { title: string; path: string },
+  sessionId: string | null,
+  locale: string,
+): Promise<{ sessionId: string; cases: number; prompt: string }> {
+  const sessions = ctx.get('sessions') as SessionServiceLike | undefined
+  if (sessions === undefined || typeof sessions.list !== 'function' || typeof sessions.get !== 'function') {
+    throw Object.assign(new Error('this Host has no session store, so there is no agent to run the tests'), { status: 503 })
+  }
+  const snapshot = await loadProject(workspaceId, facts.title, facts.path)
+  const project = snapshot.project
+  if (project.cases.length === 0) {
+    throw Object.assign(new Error('there are no cases to run: design the test cases first'), { status: 400 })
+  }
+
+  // Prefer the conversation the page names, then the latest one in this
+  // workspace, then the latest live conversation at all (the page's own).
+  const lives = sessions.list()
+  const named = sessionId === null ? undefined : sessions.get(sessionId)
+  const inWorkspace = lives.filter((item) => typeof item.cwd === 'string' && item.cwd === facts.path)
+  const target = named ?? inWorkspace.at(-1) ?? lives.at(-1)
+  if (target === undefined) {
+    throw Object.assign(new Error('no open conversation to run the tests in: open this project in a chat first'), { status: 409 })
+  }
+  if (typeof target.append !== 'function') {
+    throw Object.assign(new Error('this Host session cannot accept a run request'), { status: 503 })
+  }
+
+  const prompt = runPrompt(project, locale)
+  target.append('user/message', {
+    role: 'user',
+    content: [{ type: 'text', text: prompt }],
+    source: { kind: 'user' },
+  }, { surfaceOp: 'append' })
+  console.error(`[dsh-project-autotest] run started in session ${target.id} (${project.cases.length} cases)`)
+  return { sessionId: target.id, cases: project.cases.length, prompt }
+}
+
 /**
  * The route table: one handler per method, sharing the request plumbing.
  * @param ctx - the Host context.
@@ -648,6 +795,18 @@ export function createApi(ctx: HostContext) {
           const snapshot = await loadProject(workspaceId, facts.title, facts.path)
           const artifact = renderExport(snapshot.project, format, locale)
           reply(res, 200, { ok: true, value: { artifact } })
+          return
+        }
+        case 'run': {
+          // The one ACTING route: it hands the agent a real task. Everything
+          // else here reads or stores; this one starts work, which is why it
+          // lives behind the same loopback + same-origin fence and reports the
+          // session it used so the page can point at it.
+          const workspaceId = workspaceIdOf(body)
+          const facts = workspaceFacts(ctx, workspaceId)
+          const sessionId = typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : null
+          const locale = typeof body.locale === 'string' ? body.locale : 'zh'
+          reply(res, 200, { ok: true, value: await startRun(ctx, workspaceId, facts, sessionId, locale) })
           return
         }
         case 'documents': {

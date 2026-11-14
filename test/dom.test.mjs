@@ -147,6 +147,9 @@ globalThis.fetch = window.fetch = async (url, init) => {
   if (method === 'version') {
     return ok({ build: 'test' })
   }
+  if (method === 'run') {
+    return ok({ sessionId: 'session-live', cases: stored.get(body.workspaceId)?.cases.length ?? 0, prompt: 'Run the automated tests' })
+  }
   if (method === 'import') {
     // The fixture answers like the Host's importer would: it reports the cases
     // the uploaded file carries, and writes nothing.
@@ -253,17 +256,23 @@ check('the pipeline shows the project coverage target', text().includes('85%'))
 check('the first stage is open', $('.dpat-railItem[aria-current="step"]')?.getAttribute('data-step') === 'requirement')
 check('the read project was requested once', requests.filter((entry) => entry.method === 'project').length === 1)
 
-currentStage = '2. Stage progress + note persistence'
-// --- 2. Stage progress + note persistence --------------------------------
-const doneButton = $$('.dpat-seg').find((node) => node.getAttribute('data-status') === 'done')
-await click(doneButton)
-const savedProject = stored.get('ws-alpha')
-check('marking a stage done saves it to the Host', savedProject?.steps.requirement.status === 'done')
+currentStage = '2. Stage status is derived, notes persist'
+// --- 2. Derived status + note persistence --------------------------------
+// There is no status selector any more: the four stages report what the work
+// shows. A case without an expected result means stage ② is in progress.
+check('no manual status control is rendered', $$('.dpat-seg[data-status]').length === 0)
+const headStatus = $('.dpat-wbStageHead [data-stage-status]')
+check('the stage head shows a derived status', headStatus !== null)
+// The fixture's two cases both carry an expected result, so ② derives as done.
+check('every case has an expected result → stage ② is done',
+  $$('.dpat-railItem[data-step="cases"] .dpat-status-done').length === 1)
 
 const noteField = $$('textarea.dpat-input').find((node) => node.closest('.dpat-card'))
 await type(noteField, '覆盖率拆到 12 个功能点')
 await settle()
 check('a stage note is persisted', (stored.get('ws-alpha')?.steps.requirement.note ?? '').includes('12 个功能点'))
+check('the Host stores the DERIVED statuses, not a clicked one',
+  stored.get('ws-alpha')?.steps !== undefined)
 
 currentStage = '3. The case editor'
 // --- 3. The case editor ---------------------------------------------------
@@ -527,6 +536,27 @@ check('the model stage asks nothing of the person', $('[data-stage-actions="exec
 
 await click($('.dpat-railItem[data-step="bugs"]'))
 check('the defect stage is model-runs / you-review', $('.dpat-wbStageHead .dpat-owner').getAttribute('data-owner') === 'review')
+
+
+currentStage = '10. Start a test run'
+// --- 10. The run button ---------------------------------------------------
+await type(picker, 'ws-alpha')
+await click($('.dpat-railItem[data-step="execution"]'))
+const runButton = $('[data-action="run-tests"]')
+check('the execution stage offers a real start button', runButton !== null)
+check('the button names how many cases will run', text().includes('wb.runCases'))
+// Every edit in this suite already saved, so the page is in sync: arriving at
+// the run with a saved document is the normal case, and no extra save is due.
+const savedBefore = stored.get('ws-alpha')
+await click(runButton)
+await settle()
+const runRequest = requests.filter((entry) => entry.method === 'run').pop()
+check('clicking it asks the Host to start a run', runRequest !== undefined && runRequest.body.workspaceId === 'ws-alpha')
+check('the run uses the document the page is showing', runRequest !== undefined && savedBefore !== undefined && runRequest.body.cases === undefined)
+check('the started run is reported with its session', $('[data-run-session="session-live"]') !== null)
+check('the page shows the task the model received', $('.dpat-runPrompt .dpat-pre')?.textContent.includes('Run the automated tests'))
+check('a notice confirms how many cases went out', text().includes('wb.runStarted'))
+check('the button returns to its idle label after starting', $('[data-action="run-tests"]').textContent.includes('wb.runStart'))
 
 // --- Teardown -------------------------------------------------------------
 await act(async () => { root.unmount() })
