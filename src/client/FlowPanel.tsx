@@ -32,6 +32,7 @@ import {
 import type { Translate } from './locales.ts'
 import { contentFor, type Step } from './content.ts'
 import { flowPipeline, stepFigure } from './figures.tsx'
+import { ButtonIcon } from './ButtonIcon.tsx'
 
 /** A minimal locale-face view: what the panel needs to follow the active locale. */
 export interface LocaleFace {
@@ -215,7 +216,8 @@ export function FlowPanel(props: FlowPanelProps): ReactNode {
         disabled: view === 'detail' && index === 0,
         onClick: () => go(index - 1),
       },
-      t('page.prev'),
+      h(ButtonIcon, { name: 'prev' }),
+      h('span', null, t('page.prev')),
     ),
     h('span', { className: 'dpat-navCount', 'aria-live': 'polite' }, t('page.stepCount', { index: index + 1, total })),
     h(
@@ -226,7 +228,8 @@ export function FlowPanel(props: FlowPanelProps): ReactNode {
         disabled: view === 'detail' && index === total - 1,
         onClick: () => go(index + 1),
       },
-      t('page.next'),
+      h('span', null, t('page.next')),
+      h(ButtonIcon, { name: 'next' }),
     ),
   )
 

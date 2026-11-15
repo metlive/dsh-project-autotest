@@ -12,7 +12,7 @@
  */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname, resolve } from 'node:path'
@@ -811,7 +811,55 @@ test('a run with no cases, no session store, or a foreign origin is refused', as
   assert.equal(opaque.status, 403)
 })
 
+
+test('the storage location defaults to the workspace and can be changed, then reset', async () => {
+  WORKSPACES.push({ id: 'ws-store', path: join(HOME, 'projects', 'store'), title: 'store', sessionIds: [] })
+  const STORE = join(HOME, 'projects', 'store')
+  const CUSTOM = join(HOME, 'team-plans')
+  mkdirSync(CUSTOM, { recursive: true })
+
+  // Default: the workspace, and the snapshot says so.
+  const initial = await call(api, 'project', { workspaceId: 'ws-store' })
+  assert.equal(initial.envelope.value.storage.kind, 'default')
+  assert.equal(initial.envelope.value.storage.dir, join(STORE, 'docs', 'autotest'))
+  await call(api, 'save', { workspaceId: 'ws-store', project: { cases: [{ title: 'A', expected: 'x' }] } })
+  assert.ok(statSync(join(STORE, 'docs', 'autotest', 'project.json')).isFile())
+
+  // Refused choices stay refused: relative, and non-existent.
+  const relative = await call(api, 'storage', { workspaceId: 'ws-store', dir: 'plans/autotest' })
+  assert.equal(relative.status, 400)
+  assert.match(relative.envelope.error.message, /absolute/)
+  const missing = await call(api, 'storage', { workspaceId: 'ws-store', dir: join(HOME, 'no-such-dir') })
+  assert.equal(missing.status, 400)
+  assert.match(missing.envelope.error.message, /writable/)
+
+  // Custom: the document moves, and the saved document records where it is.
+  const chosen = await call(api, 'storage', { workspaceId: 'ws-store', dir: CUSTOM })
+  assert.equal(chosen.status, 200)
+  assert.equal(chosen.envelope.value.storage.kind, 'custom')
+  const afterSwitch = await call(api, 'project', { workspaceId: 'ws-store' })
+  assert.equal(afterSwitch.envelope.value.existed, false, 'nothing has been written to the new place yet')
+  assert.equal(afterSwitch.envelope.value.storagePath, join(CUSTOM, 'project.json'))
+  await call(api, 'save', { workspaceId: 'ws-store', project: { cases: [{ title: 'B', expected: 'y' }] } })
+  const stored = JSON.parse(readFileSync(join(CUSTOM, 'project.json'), 'utf8'))
+  assert.equal(stored.storageDir, CUSTOM, 'the document remembers its own location')
+  assert.ok(statSync(join(CUSTOM, 'report.md')).isFile(), 'the report follows the document')
+
+  // The setting is remembered on disk, so a restart keeps it.
+  assert.ok(statSync(join(STORE, '.dsh-autotest-storage.json')).isFile())
+  const reloaded = await call(api, 'project', { workspaceId: 'ws-store' })
+  assert.equal(reloaded.envelope.value.storage.kind, 'custom')
+
+  // Reset returns to the default, where the first project still lives.
+  const reset = await call(api, 'storage', { workspaceId: 'ws-store', dir: null })
+  assert.equal(reset.envelope.value.storage.kind, 'default')
+  const back = await call(api, 'project', { workspaceId: 'ws-store' })
+  assert.equal(back.envelope.value.existed, true)
+  assert.equal(back.envelope.value.project.cases[0].title, 'A')
+})
+
 // --- Teardown / runner --------------------------------------------------
+
 
 
 let passed = 0

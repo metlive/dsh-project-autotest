@@ -65,6 +65,7 @@ const CLIENT_MODULES = [
   'client/content.ts',
   'client/figures.tsx',
   'client/FlowIcon.tsx',
+  'client/ButtonIcon.tsx',
   'client/api.ts',
   'client/styles.ts',
   'client/StepRail.tsx',

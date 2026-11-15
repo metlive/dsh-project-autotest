@@ -4,8 +4,9 @@
  * Structure:
  *
  * - a header with the workspace picker (the "switch project" control), the
- *   save state, the export menu and the storage path;
- * - a left rail listing the seven stages with their status;
+ *   save state and the import/export actions;
+ * - one horizontal step bar carrying the four stages and their derived status,
+ *   with a KPI line above it (the old vertical rail repeated the same progress);
  * - the stage body. Stage 3 (design cases) is the full case editor — a
  *   positive/negative tree with per-case steps, expected results and run
  *   verdicts; stage 7 is the defect tracker; every other stage is a working
@@ -29,9 +30,7 @@ import {
 import {
   deriveStageStatus,
   makeId,
-  projectProgress,
   splitCases,
-  STEP_IDS,
   type AutomationLevel,
   type CaseKind,
   type CaseResult,
@@ -47,11 +46,11 @@ import {
   type TestCase,
 } from '../wire.ts'
 import { CONTENT_STEP_TO_STAGE, contentFor } from './content.ts'
-import { StatusDot, StepRail } from './StepRail.tsx'
-import { flowPipeline } from './figures.tsx'
+import { StatusDot, StepKpi, StepRail } from './StepRail.tsx'
 import { FlowIcon } from './FlowIcon.tsx'
+import { ButtonIcon } from './ButtonIcon.tsx'
 import type { Translate } from './locales.ts'
-import { downloadArtifact, exportProject, hostBuild, listDocuments, listWorkspaces, loadProject, saveProject, startRun, type DocumentInput, type ImportPreview, type RunStart } from './api.ts'
+import { downloadArtifact, exportProject, hostBuild, listDocuments, listWorkspaces, loadProject, saveProject, setStorage, startRun, type DocumentInput, type ImportPreview, type RunStart, type StorageInfo } from './api.ts'
 import { ImportPanel, type ImportMode } from './ImportPanel.tsx'
 import { DocumentsPanel } from './DocumentsPanel.tsx'
 import { toTestCase } from '../importers.ts'
@@ -109,9 +108,11 @@ function Select<T extends string>(props: {
   options: Array<{ value: T; label: string }>
   onChange: (value: T) => void
 }): ReactNode {
+  // Stacked like every other field (label above the control): an inline
+  // label left the select floating far from the column it belonged to.
   return h(
     'label',
-    { className: 'dpat-selectWrap' },
+    { className: 'dpat-field' },
     h('span', { className: 'dpat-selectLabel' }, props.label),
     h(
       'select',
@@ -222,6 +223,12 @@ export function Workbench(props: WorkbenchProps): ReactNode {
   const [runState, setRunState] = useState<'idle' | 'starting' | RunStart>('idle')
   /** Requirement documents on disk, the only stage-① input the Host owns. */
   const [requirementDocs, setRequirementDocs] = useState<DocumentInput[]>([])
+  /** Where this workspace's project lives, and whether the user chose it. */
+  const [storage, setStorageInfo] = useState<StorageInfo | null>(null)
+  const [storageOpen, setStorageOpen] = useState(false)
+  const [storageDraft, setStorageDraft] = useState('')
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [storageBusy, setStorageBusy] = useState(false)
 
   // The latest locale, read by the saver so the report follows the UI language
   // without making `persist` depend on it (which would rebuild every callback).
@@ -250,6 +257,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     try {
       const snapshot = await loadProject(id)
       setProject(snapshot.project)
+      setStorageInfo(snapshot.storage)
       // Stage ① is judged from the documents on disk, so fetch them with the
       // project rather than waiting for the panel to mount.
       void listDocuments(id).then(setRequirementDocs).catch(() => setRequirementDocs([]))
@@ -317,6 +325,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           const result = await saveProject(document.workspaceId, document, activeLocaleRef.current)
           setProject(result.project)
           setStoragePath(result.storagePath)
+          if (result.storage !== undefined) setStorageInfo(result.storage)
           setSaved(true)
           setError(null)
           // Reflect the new count in the picker without a full reload.
@@ -448,6 +457,28 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     setNotice(t('wb.importDone', { count: preview.cases.length }))
   }, [update, t])
 
+  /**
+   * Point this workspace's storage at the typed directory (or back at the
+   * default). The project is re-read afterwards, because the document that
+   * comes back is whatever lives at the new location.
+   */
+  const applyStorage = useCallback(async (dir: string | null) => {
+    if (workspaceId === null) return
+    setStorageBusy(true)
+    setStorageError(null)
+    try {
+      const next = await setStorage(workspaceId, dir)
+      setStorageInfo(next)
+      setStorageOpen(false)
+      await openWorkspace(workspaceId)
+      setNotice(t('wb.storageMoved'))
+    } catch (cause) {
+      setStorageError((cause as Error).message)
+    } finally {
+      setStorageBusy(false)
+    }
+  }, [workspaceId, openWorkspace, t])
+
   /** Hand the cases to the agent: a real run, not a status flag. */
   const runTests = useCallback(async () => {
     if (workspaceId === null || project === null) return
@@ -498,6 +529,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
       { className: 'dpat-wbTitle' },
       h(FlowIcon, { size: 18 }),
       h('h2', { className: 'dpat-title' }, t('page.title')),
+      h('span', { className: 'dpat-wbSubtitle' }, t('wb.subtitle')),
     ),
     h(
       'div',
@@ -528,7 +560,8 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           title: t('wb.importOpen'),
           onClick: () => setImportOpen((open) => !open),
         },
-        t('wb.import'),
+        h(ButtonIcon, { name: 'import' }),
+        h('span', null, t('wb.import')),
       ),
       h(
         'div',
@@ -543,7 +576,8 @@ export function Workbench(props: WorkbenchProps): ReactNode {
             disabled: project === null || exporting !== null,
             onClick: () => setExportOpen((open) => !open),
           },
-          exporting !== null ? t('wb.exporting') : t('wb.export'),
+          h(ButtonIcon, { name: 'export' }),
+          h('span', null, exporting !== null ? t('wb.exporting') : t('wb.export')),
         ),
         exportOpen
           ? h(
@@ -593,7 +627,6 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     )
   }
 
-  const progress = projectProgress(project)
   const buckets = splitCases(project.cases)
   const casesById = new Map(project.cases.map((item) => [item.id, item]))
   const stepMatch = content.steps.find((step) => CONTENT_STEP_TO_STAGE[step.id] === activeStep)
@@ -655,8 +688,6 @@ export function Workbench(props: WorkbenchProps): ReactNode {
         'data-owner': stepMatch.owner,
         title: t(`wb.owner.${stepMatch.owner}`),
       },
-      stepMatch.owner === 'model' ? '🤖' : stepMatch.owner === 'review' ? '🤖 → 👤' : '👤',
-      ' ',
       t(`wb.owner.${stepMatch.owner}`),
     )
 
@@ -697,9 +728,10 @@ export function Workbench(props: WorkbenchProps): ReactNode {
     }
     if (modelRunsAlone) {
       const runResult = runState === 'idle' || runState === 'starting' ? null : runState
+      const pipeKeys = ['readCases', 'writeScripts', 'runScripts', 'selfCheck', 'fillVerdict'] as const
       return h(
         'div',
-        { className: 'dpat-stageBody' },
+        { className: 'dpat-stageBody', 'data-stage': activeStep },
         h(
           'section',
           { className: 'dpat-card dpat-modelCard', 'data-model-stage': activeStep },
@@ -718,8 +750,11 @@ export function Workbench(props: WorkbenchProps): ReactNode {
                 title: project !== null && project.cases.length === 0 ? t('wb.runNoCases') : t('wb.runStart'),
                 onClick: () => { void runTests() },
               },
-              runState === 'starting' ? t('wb.runStarting') : `▶ ${t('wb.runStart')}`,
+              h(ButtonIcon, { name: 'play' }),
+              h('span', null, runState === 'starting' ? t('wb.runStarting') : t('wb.runStart')),
             ),
+            // 执行由 DSH 宿主会话发起：徽标只说明归属，不暴露 API / Key 配置。
+            h('span', { className: 'dpat-engine' }, t('wb.engine')),
             h('span', { className: 'dpat-muted dpat-small' }, t('wb.runCases', { count: project === null ? 0 : project.cases.length })),
           ),
           runResult === null
@@ -736,28 +771,46 @@ export function Workbench(props: WorkbenchProps): ReactNode {
                 h('pre', { className: 'dpat-pre' }, runResult.prompt),
               ),
             ),
+          // 短标签画流水线；长要点收进折叠区，一屏看完但信息不丢。
           h(
-            'ul',
-            { className: 'dpat-list' },
-            (['readCases', 'writeScripts', 'runScripts', 'selfCheck', 'fillVerdict'] as const).map((key) =>
-              h('li', { key }, h('span', { className: 'dpat-dot', 'aria-hidden': 'true' }), t(`wb.modelStep.${key}`)),
+            'ol',
+            { className: 'dpat-pipeFlow' },
+            pipeKeys.map((key, index) =>
+              h(
+                'li',
+                { key, className: 'dpat-pipeItem' },
+                h('span', { className: 'dpat-pipeDot', 'aria-hidden': 'true' }, String(index + 1)),
+                h('span', { className: 'dpat-pipeLabel' }, t(`wb.pipe.${key}`)),
+              ),
             ),
           ),
-        ),
-        stepMatch === undefined
-          ? null
-          : h(
-            'section',
-            { className: 'dpat-card' },
-            h('h4', { className: 'dpat-cardTitle' }, t('page.keyPoints')),
-            h('ul', { className: 'dpat-list' }, stepMatch.practices.map((line, index) => h('li', { key: index }, h('span', { className: 'dpat-dot', 'aria-hidden': 'true' }), line))),
-            h('p', { className: 'dpat-pitfallText' }, h('strong', null, `${t('page.pitfall')}: `), stepMatch.pitfall),
+          h(
+            'details',
+            { className: 'dpat-promptDetails' },
+            h('summary', null, t('page.keyPoints')),
+            h(
+              'ul',
+              { className: 'dpat-list' },
+              pipeKeys.map((key) =>
+                h('li', { key }, h('span', { className: 'dpat-dot', 'aria-hidden': 'true' }), t(`wb.modelStep.${key}`)),
+              ).concat(
+                stepMatch === undefined
+                  ? []
+                  : stepMatch.practices.map((line, index) =>
+                    h('li', { key: `practice-${index}` }, h('span', { className: 'dpat-dot', 'aria-hidden': 'true' }), line),
+                  ),
+              ),
+            ),
+            stepMatch === undefined
+              ? null
+              : h('p', { className: 'dpat-pitfallText' }, h('strong', null, `${t('page.pitfall')}: `), stepMatch.pitfall),
           ),
+        ),
       )
     }
     return h(
       'div',
-      { className: 'dpat-stageBody' },
+      { className: 'dpat-stageBody', 'data-stage': activeStep },
       activeStep === 'requirement' && workspaceId !== null
         ? h(DocumentsPanel, { t, workspaceId })
         : null,
@@ -766,9 +819,9 @@ export function Workbench(props: WorkbenchProps): ReactNode {
       stepMatch === undefined
         ? null
         : h(
-          'section',
-          { className: 'dpat-card' },
-          h('h4', { className: 'dpat-cardTitle' }, stepMatch.title),
+          'details',
+          { className: 'dpat-card dpat-noteDetails' },
+          h('summary', null, t('page.keyPoints')),
           h('p', { className: 'dpat-stageSummary' }, stepMatch.summary),
           h('div', { className: 'dpat-fields' },
             h('div', { className: 'dpat-field' }, h('span', { className: 'dpat-fieldLabel' }, t('page.input')), h('span', { className: 'dpat-fieldValue' }, stepMatch.input)),
@@ -806,6 +859,19 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           'aria-label': t('wb.caseTitle'),
           onChange: (event: { target: { value: string } }) => patchCase(item.id, { title: event.target.value }),
         }),
+        h(IconButton, {
+          label: t('wb.removeCase'),
+          title: t('wb.removeCase'),
+          className: 'dpat-danger',
+          onClick: () => removeCase(item.id),
+        }, '✕'),
+      ),
+      // The body: a labelled two-column grid. Every field keeps its label ABOVE
+      // its value (the old inline "label on the left, control on the right"
+      // layout is what made the editor look broken).
+      h(
+        'div',
+        { className: 'dpat-caseBody' },
         h(Select<string>, {
           label: t('wb.technique'),
           value: item.technique,
@@ -818,19 +884,12 @@ export function Workbench(props: WorkbenchProps): ReactNode {
           options: (['untested', 'passed', 'failed', 'blocked'] as CaseResult[]).map((result) => ({ value: result, label: t(`wb.result.${result}`) })),
           onChange: (result) => patchCase(item.id, { result: result as CaseResult }),
         }),
-        h(IconButton, {
-          label: t('wb.removeCase'),
-          title: t('wb.removeCase'),
-          className: 'dpat-danger',
-          onClick: () => removeCase(item.id),
-        }, '✕'),
-      ),
-      h(TextField, {
-        label: t('wb.preconditions'),
-        value: item.preconditions,
-        placeholder: t('wb.preconditionsPlaceholder'),
-        onChange: (preconditions) => patchCase(item.id, { preconditions }),
-      }),
+        h(TextField, {
+          label: t('wb.preconditions'),
+          value: item.preconditions,
+          placeholder: t('wb.preconditionsPlaceholder'),
+          onChange: (preconditions) => patchCase(item.id, { preconditions }),
+        }),
       h(
         'div',
         { className: 'dpat-steps' },
@@ -937,7 +996,8 @@ export function Workbench(props: WorkbenchProps): ReactNode {
               setNotice(t('wb.defectFiled', { title: item.title }))
             },
           },
-          t('wb.fileDefect'),
+          h(ButtonIcon, { name: 'bug' }),
+          h('span', null, t('wb.fileDefect')),
         )
         : null,
       h(TextField, {
@@ -946,6 +1006,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
         placeholder: t('wb.caseNotePlaceholder'),
         onChange: (note) => patchCase(item.id, { note }),
       }),
+      ),
     )
 
     const bucket = (kind: CaseKind, items: TestCase[], description: string): ReactNode => h(
@@ -956,7 +1017,12 @@ export function Workbench(props: WorkbenchProps): ReactNode {
         { className: 'dpat-bucketHead' },
         h('h4', { className: 'dpat-bucketTitle' }, `${t(`wb.kind.${kind}`)} (${items.length})`),
         h('p', { className: 'dpat-bucketHint' }, description),
-        h('button', { type: 'button', className: 'dpat-btn', onClick: () => addCase(kind) }, t('wb.addCase')),
+        h(
+          'button',
+          { type: 'button', className: 'dpat-btn', onClick: () => addCase(kind) },
+          h(ButtonIcon, { name: 'add' }),
+          h('span', null, t('wb.addCase')),
+        ),
       ),
       items.length === 0
         ? h('p', { className: 'dpat-muted dpat-small' }, t('wb.noCases'))
@@ -965,7 +1031,7 @@ export function Workbench(props: WorkbenchProps): ReactNode {
 
     return h(
       'div',
-      { className: 'dpat-stageBody' },
+      { className: 'dpat-stageBody', 'data-stage': activeStep },
       h('p', { className: 'dpat-stageLead' }, t('wb.casesLead')),
       bucket('positive', buckets.positive, t('wb.positiveHint')),
       bucket('negative', buckets.negative, t('wb.negativeHint')),
@@ -976,16 +1042,34 @@ export function Workbench(props: WorkbenchProps): ReactNode {
   function defectTracker(): ReactNode {
     return h(
       'div',
-      { className: 'dpat-stageBody' },
+      { className: 'dpat-stageBody', 'data-stage': activeStep },
       h('p', { className: 'dpat-stageLead' }, t('wb.defectsLead')),
+      // 失败先归因：只有产品缺陷才提单，脚本与环境问题由模型修正后重跑。
+      h(
+        'div',
+        { className: 'dpat-triage' },
+        (['product', 'script', 'environment'] as const).map((key) =>
+          h(
+            'div',
+            { key, className: 'dpat-triageItem' },
+            h('h4', null, t(`wb.reason.${key}`)),
+            h('p', null, t(`wb.triage.${key}`)),
+          ),
+        ),
+      ),
       h(
         'div',
         { className: 'dpat-bucketHead' },
         h('h4', { className: 'dpat-bucketTitle' }, `${t('wb.defects')} (${project === null ? 0 : project.defects.length})`),
-        h('button', { type: 'button', className: 'dpat-btn dpat-btnPrimary', onClick: addDefect }, t('wb.addDefect')),
+        h(
+          'button',
+          { type: 'button', className: 'dpat-btn dpat-btnPrimary', onClick: addDefect },
+          h(ButtonIcon, { name: 'bug' }),
+          h('span', null, t('wb.addDefect')),
+        ),
       ),
       project.defects.length === 0
-        ? h('p', { className: 'dpat-muted dpat-small' }, t('wb.noDefects'))
+        ? h('p', { className: 'dpat-muted dpat-small dpat-emptyState' }, t('wb.noDefects'))
         : h(
           'div',
           { className: 'dpat-caseList' },
@@ -1066,7 +1150,8 @@ export function Workbench(props: WorkbenchProps): ReactNode {
                     'data-action': 'close-defect',
                     onClick: () => patchDefect(defect.id, { status: 'closed' }),
                   },
-                  t('wb.closeDefect'),
+                  h(ButtonIcon, { name: 'close' }),
+                  h('span', null, t('wb.closeDefect')),
                 )
                 : null,
               defect.requirementChanged && defect.regression !== 'pending'
@@ -1075,22 +1160,51 @@ export function Workbench(props: WorkbenchProps): ReactNode {
             ),
           ),
         ),
+      h(
+        'div',
+        { className: 'dpat-lifecycle' },
+        DEFECT_STATUSES.map((status) => h('span', { key: status }, t(`wb.defect.${status}`))),
+      ),
     )
   }
 
-  const overview = h(
+  const activeMeta = { status: (stageStatus ?? project.steps)[activeStep] }
+
+  // One derived state line per stage: "owner · status". Assembled here so the
+  // rail stays purely presentational and every word still comes from locales.ts.
+  const stageSubtitles = {} as Record<StepId, string>
+  for (const step of content.steps) {
+    const stage = CONTENT_STEP_TO_STAGE[step.id] as StepId | undefined
+    if (stage === undefined) continue
+    // The rail is narrow: the long "model runs · you review" label would clip.
+    const ownerLabel = step.owner === 'review' ? t('wb.ownerShort.review') : t(`wb.owner.${step.owner}`)
+    stageSubtitles[stage] = `${ownerLabel} · ${t(`wb.status.${(stageStatus ?? project.steps)[stage]}`)}`
+  }
+
+  // The storage row is the footer of the content column, not a page-wide strip.
+  const pathRow = h(
     'div',
-    { className: 'dpat-wbOverview' },
-    flowPipeline(STEP_IDS.map((id) => stageTitles[id]), t('page.flowTitle')),
+    { className: 'dpat-wbPath' },
+    currentWorkspace === undefined ? null : h('code', { className: 'dpat-path' }, currentWorkspace.path),
+    h('span', { className: 'dpat-muted dpat-small' }, `${t('wb.storage')}: `),
+    h('code', { className: 'dpat-path' }, storagePath),
+    storage?.kind === 'custom' ? h('span', { className: 'dpat-storageBadge' }, t('wb.storageCustom')) : null,
     h(
-      'div',
-      { className: 'dpat-progress' },
-      h('span', { className: 'dpat-progressLabel' }, t('wb.progress', { done: progress.done, total: progress.total })),
-      h('span', { className: 'dpat-progressBar' }, h('span', { className: 'dpat-progressFill', style: { width: `${progress.percent}%` } })),
+      'button',
+      {
+        type: 'button',
+        className: 'dpat-linkBtn',
+        'data-action': 'storage-settings',
+        title: t('wb.storageSettings'),
+        onClick: () => {
+          setStorageDraft(storage?.dir ?? storagePath)
+          setStorageError(null)
+          setStorageOpen((open) => !open)
+        },
+      },
+      t('wb.storageSettings'),
     ),
   )
-
-  const activeMeta = { status: (stageStatus ?? project.steps)[activeStep] }
 
   return h(
     'div',
@@ -1119,44 +1233,97 @@ export function Workbench(props: WorkbenchProps): ReactNode {
         h('span', null, notice),
         h('button', { type: 'button', className: 'dpat-linkBtn', onClick: () => setNotice(null) }, t('wb.dismiss')),
       ),
-    h(
-      'div',
-      { className: 'dpat-wbPath' },
-      currentWorkspace === undefined ? null : h('code', { className: 'dpat-path' }, currentWorkspace.path),
-      h('span', { className: 'dpat-muted dpat-small' }, `${t('wb.storage')}: `),
-      h('code', { className: 'dpat-path' }, storagePath),
-    ),
-    overview,
+    storageOpen
+      ? h(
+        'div',
+        { className: 'dpat-storagePanel', role: 'group', 'aria-label': t('wb.storageSettings'), 'data-storage-panel': 'open' },
+        h('p', { className: 'dpat-muted dpat-small' }, t('wb.storageHint')),
+        h(
+          'div',
+          { className: 'dpat-storageRow' },
+          h('input', {
+            className: 'dpat-input',
+            type: 'text',
+            value: storageDraft,
+            spellCheck: false,
+            'aria-label': t('wb.storageDir'),
+            placeholder: storage?.defaultDir ?? '',
+            onChange: (event: { target: { value: string } }) => setStorageDraft(event.target.value),
+          }),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dpat-btn dpat-btnPrimary',
+              'data-storage-action': 'apply',
+              disabled: storageBusy || storageDraft.trim() === '',
+              onClick: () => { void applyStorage(storageDraft.trim()) },
+            },
+            h(ButtonIcon, { name: 'apply' }),
+            h('span', null, storageBusy ? t('wb.storageBusy') : t('wb.storageApply')),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dpat-btn',
+              'data-storage-action': 'reset',
+              disabled: storageBusy,
+              onClick: () => { void applyStorage(null) },
+            },
+            h(ButtonIcon, { name: 'reset' }),
+            h('span', null, t('wb.storageReset')),
+          ),
+        ),
+        h('p', { className: 'dpat-muted dpat-small' }, `${t('wb.storageDefault')}: ${storage?.defaultDir ?? ''}`),
+        storageError === null ? null : h('p', { className: 'dpat-hintWarn', role: 'alert' }, storageError),
+      )
+      : null,
     importOpen && workspaceId !== null
       ? h(ImportPanel, { t, workspaceId, onApply: applyImport, onClose: () => setImportOpen(false) })
       : null,
     h(
       'div',
       { className: 'dpat-wbBody' },
-      h(StepRail, { project, status: stageStatus ?? project.steps, active: activeStep, t, titles: stageTitles, onSelect: setActiveStep }),
+      h(StepRail, {
+        project,
+        status: stageStatus ?? project.steps,
+        active: activeStep,
+        t,
+        titles: stageTitles,
+        subtitles: stageSubtitles,
+        storagePath,
+        onSelect: setActiveStep,
+      }),
       h(
         'div',
-        { className: 'dpat-wbStage' },
+        { className: 'dpat-wbContent' },
+        h(StepKpi, { project, status: stageStatus ?? project.steps, active: activeStep, t }),
         h(
           'div',
-          { className: 'dpat-wbStageHead' },
-          h('h3', { className: 'dpat-wbStageTitle' }, `${STEP_IDS.indexOf(activeStep) + 1}. ${stageTitles[activeStep]}`),
-          ownerBadge,
-          // Status is DERIVED from the work: shown, not chosen. The tooltip
-          // says what would advance it, so the pill is an explanation.
+          { className: 'dpat-wbStage' },
           h(
-            'span',
-            {
-              className: `dpat-stageStatus dpat-stageStatus-${activeMeta.status}`,
-              'data-stage-status': activeMeta.status,
-              title: t(`wb.statusWhy.${activeStep}.${activeMeta.status}`),
-            },
-            h(StatusDot, { status: activeMeta.status }),
-            t(`wb.status.${activeMeta.status}`),
+            'div',
+            { className: 'dpat-wbStageHead' },
+            h('h3', { className: 'dpat-wbStageTitle' }, stageTitles[activeStep]),
+            ownerBadge,
+            // Status is DERIVED from the work: shown, not chosen. The tooltip
+            // says what would advance it, so the pill is an explanation.
+            h(
+              'span',
+              {
+                className: `dpat-stageStatus dpat-stageStatus-${activeMeta.status}`,
+                'data-stage-status': activeMeta.status,
+                title: t(`wb.statusWhy.${activeStep}.${activeMeta.status}`),
+              },
+              h(StatusDot, { status: activeMeta.status }),
+              t(`wb.status.${activeMeta.status}`),
+            ),
+            h('span', { className: 'dpat-muted dpat-small' }, `${casesById.size} ${t('wb.cases')}`),
           ),
-          h('span', { className: 'dpat-muted dpat-small' }, `${casesById.size} ${t('wb.cases')}`),
+          stageBody,
         ),
-        stageBody,
+        pathRow,
       ),
     ),
   )

@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动化测试工作台 · UI 设计稿（DSH / DeepSeek Harness 兼容）</title>
+<style>
+/*
+ * 设计稿自身先声明一份「浅色」的 DSH 主题别名。
+ * 移植到插件时删除这段 :root 即可：宿主 --dsw-alias-* 会接管，
+ * 所有 var(..., fallback) 保证变量缺失也不会破版。
+ */
+:root {
+  --dsw-alias-bg-base: #f7f8fa;
+  --dsw-alias-bg-layer-1: #ffffff;
+  --dsw-alias-bg-layer-2: #f1f3f7;
+  --dsw-alias-bg-module-platform: #eef1f6;
+  --dsw-alias-label-primary: #1b1f24;
+  --dsw-alias-label-secondary: #5f6b7a;
+  --dsw-alias-label-tertiary: #98a2b3;
+  --dsw-alias-label-primary-foreground: #ffffff;
+  --dsw-alias-border-l1: #e6e9ee;
+  --dsw-alias-border-l2: #d5dae2;
+  --dsw-alias-brand-primary: #4d6bfe;
+  --dsw-alias-state-success-primary: #15a463;
+  --dsw-alias-state-warn-primary: #d98a0b;
+  --dsw-alias-state-error-primary: #dc4a4a;
+  --dsw-alias-interactive-bg-hover: rgba(20, 30, 50, .05);
+  --dsw-radius-md: 8px;
+  --dsw-radius-lg: 12px;
+  --dsw-elevation-prominent: 0 1px 2px rgba(16, 24, 40, .04), 0 12px 32px rgba(16, 24, 40, .06);
+}
+
+/* ---------- 设计稿外壳（非插件代码） ---------- */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #eef1f5;
+  color: var(--dsw-alias-label-primary, #1b1f24);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 1320px; margin: 0 auto; padding: 28px 32px 80px; }
+.docHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; }
+.docTitle { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.01em; }
+.docSub { margin: 4px 0 0; font-size: 13px; color: var(--dsw-alias-label-secondary, #5f6b7a); }
+.docMeta { display: flex; gap: 8px; flex-wrap: wrap; }
+.docTag { padding: 5px 11px; border: 1px solid #dfe4ec; border-radius: 999px; background: #fff; font-size: 12px; color: #4a5566; }
+.docTag.brand { color: #3350d8; border-color: #cfd8ff; background: #f3f5ff; }
+.tabs { display: inline-flex; gap: 2px; padding: 4px; margin-bottom: 18px; border-radius: 10px; background: #e3e7ee; }
+.tab { appearance: none; border: 0; background: transparent; color: #5f6b7a; font: inherit; font-size: 13px;
+  height: 32px; padding: 0 18px; border-radius: 7px; cursor: pointer; }
+.tab[aria-selected="true"] { background: #fff; color: #1b1f24; font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,.08); }
+.view[hidden] { display: none !important; }
+.preview { border: 1px solid #dde2ea; border-radius: 16px; overflow: hidden; box-shadow: 0 18px 48px rgba(16,24,40,.10); }
+.caption { margin: 12px 2px 0; font-size: 12px; color: #7b8797; }
+
+/* ---------- 插件界面：全部类名以 .dpat- 前缀隔离 ---------- */
+.dpat-root {
+  --fg: var(--dsw-alias-label-primary, #1b1f24);
+  --fg2: var(--dsw-alias-label-secondary, #5f6b7a);
+  --fg3: var(--dsw-alias-label-tertiary, #98a2b3);
+  --line: var(--dsw-alias-border-l1, #e6e9ee);
+  --line2: var(--dsw-alias-border-l2, #d5dae2);
+  --surface: var(--dsw-alias-bg-layer-1, #fff);
+  --surface2: var(--dsw-alias-bg-layer-2, #f1f3f7);
+  --accent: var(--dsw-alias-brand-primary, #4d6bfe);
+  --ok: var(--dsw-alias-state-success-primary, #15a463);
+  --warn: var(--dsw-alias-state-warn-primary, #d98a0b);
+  --bad: var(--dsw-alias-state-error-primary, #dc4a4a);
+  --r: 12px;
+  background: var(--dsw-alias-bg-base, #f7f8fa);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dpat-root *, .dpat-root *::before, .dpat-root *::after { box-sizing: border-box; }
+.dpat-root h1, .dpat-root h2, .dpat-root h3, .dpat-root h4, .dpat-root p, .dpat-root ul, .dpat-root ol { margin: 0; }
+.dpat-root button, .dpat-root input, .dpat-root select, .dpat-root textarea { font: inherit; color: inherit; }
+.dpat-root button { cursor: pointer; }
+
+/* 顶栏 */
+.dpat-topbar { display: flex; align-items: center; gap: 16px; padding: 16px 28px;
+  background: var(--surface); border-bottom: 1px solid var(--line); }
+.dpat-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dpat-brandIcon { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; flex: none; }
+.dpat-brandName { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.dpat-brandSub { font-size: 12px; color: var(--fg3); margin-left: 2px; }
+.dpat-topRight { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.dpat-workspace { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px;
+  border: 1px solid var(--line2); border-radius: 9px; background: var(--surface); font-size: 13px; }
+.dpat-workspace svg { color: var(--fg3); }
+.dpat-saved { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg2); }
+.dpat-saved i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.dpat-btn { appearance: none; height: 34px; padding: 0 14px; border: 1px solid var(--line2); border-radius: 9px;
+  background: var(--surface); color: var(--fg); font-size: 13px; transition: background .12s, border-color .12s; }
+.dpat-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(20,30,50,.05)); }
+.dpat-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dpat-btn-primary { border-color: var(--accent); background: var(--accent);
+  color: var(--dsw-alias-label-primary-foreground, #fff); font-weight: 550; }
+.dpat-btn-primary:hover { background: #3f5bea; }
+.dpat-btn-lg { height: 40px; padding: 0 20px; font-size: 14px; }
+.dpat-btn:disabled { opacity: .6; cursor: default; }
+.dpat-iconBtn { width: 34px; padding: 0; display: grid; place-items: center; }
+
+/* 主体：左侧阶段导航 + 右侧内容；全页面只有这一列进度指示 */
+.dpat-body { display: grid; grid-template-columns: 232px minmax(0, 1fr); align-items: stretch; }
+.dpat-content { min-width: 0; display: flex; flex-direction: column; }
+.dpat-steps { display: flex; flex-direction: column; gap: 2px; padding: 22px 12px 24px;
+  background: var(--surface); border-right: 1px solid var(--line); }
+.dpat-navGroup { margin: 2px 0 6px; padding: 0 12px; font-size: 11px; font-weight: 600;
+  letter-spacing: .08em; color: var(--fg3); }
+.dpat-navGroup.dpat-navGroupGap { margin-top: 20px; }
+.dpat-stepItem { position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 12px; border: 0; border-radius: 9px; background: transparent; text-align: left; color: var(--fg2); }
+.dpat-stepItem::after { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px;
+  border-radius: 0 2px 2px 0; background: transparent; }
+.dpat-stepItem[aria-current="step"] { background: var(--dsw-alias-bg-layer-2, #f1f3f7); }
+.dpat-stepItem[aria-current="step"]::after { background: var(--accent); }
+.dpat-stepItem:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(20,30,50,.05)); }
+.dpat-stepNo { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line2);
+  display: grid; place-items: center; font-size: 12px; font-weight: 600; background: var(--surface); }
+.dpat-stepItem[aria-current="step"] .dpat-stepNo { background: var(--accent); border-color: var(--accent); color: #fff; }
+.dpat-stepItem[data-done="true"] .dpat-stepNo { background: var(--ok); border-color: var(--ok); color: #fff; }
+.dpat-stepText { min-width: 0; display: flex; flex-direction: column; line-height: 1.45; }
+.dpat-stepTitle { display: block; font-size: 13px; font-weight: 550; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dpat-stepState { display: block; font-size: 11px; color: var(--fg3); }
+.dpat-stepItem:not([aria-current="step"]) .dpat-stepTitle { color: var(--fg2); font-weight: 450; }
+.dpat-stepItem[aria-current="step"] .dpat-stepTitle { color: var(--accent); }
+.dpat-navFoot { margin-top: auto; padding: 24px 12px 0; border-top: 1px solid var(--line); font-size: 11px; color: var(--fg3); }
+.dpat-navFootRow { display: flex; justify-content: space-between; align-items: baseline; color: var(--fg2); }
+.dpat-navFootRow b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dpat-navTrack { display: block; height: 4px; margin: 9px 0 14px; border-radius: 999px;
+  background: var(--surface2); overflow: hidden; }
+.dpat-navFill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.dpat-navFoot p { line-height: 1.5; word-break: break-all; }
+
+/* 概览条：移到右侧内容列顶部 */
+.dpat-kpi { display: flex; align-items: center; gap: 0; padding: 15px 28px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.dpat-kpiItem { display: flex; align-items: baseline; gap: 7px; padding-right: 26px; margin-right: 26px; border-right: 1px solid var(--line); }
+.dpat-kpiItem:last-of-type { border-right: 0; }
+.dpat-kpiNum { font-size: 19px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dpat-kpiLabel { font-size: 12px; color: var(--fg2); }
+.dpat-kpiNote { margin-left: auto; font-size: 12px; color: var(--fg3); }
+
+/* 内容区 */
+.dpat-main { flex: 1; padding: 26px 28px 40px; min-height: 580px; }
+.dpat-wrap { max-width: 1080px; margin: 0 auto; }
+.dpat-stage[hidden] { display: none !important; }
+.dpat-stageHead { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+.dpat-stageHead h2 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.dpat-stageHead p { margin-top: 5px; font-size: 13px; color: var(--fg2); }
+.dpat-owner { flex: none; margin-left: auto; margin-top: 3px; padding: 4px 11px; border-radius: 999px;
+  font-size: 12px; border: 1px solid var(--line2); color: var(--fg2); background: var(--surface); }
+.dpat-owner-model { color: #3350d8; border-color: #cfd8ff; background: #f3f5ff; }
+.dpat-owner-review { color: #0f7a4a; border-color: #bfe7d1; background: #f0faf4; }
+.dpat-card { padding: 20px 22px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.dpat-cardHead { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.dpat-cardHead h3 { font-size: 14px; font-weight: 650; }
+.dpat-cardHead .right { margin-left: auto; font-size: 12px; color: var(--fg3); }
+.dpat-grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+.dpat-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.dpat-stack { display: flex; flex-direction: column; gap: 16px; }
+.dpat-muted { color: var(--fg2); }
+.dpat-small { font-size: 12px; }
+.dpat-note { font-size: 12px; color: var(--fg3); }
+
+/* 输入控件 */
+.dpat-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+.dpat-field:last-child { margin-bottom: 0; }
+.dpat-label { font-size: 12px; font-weight: 600; color: var(--fg2); }
+.dpat-input, .dpat-select, .dpat-textarea { width: 100%; min-height: 38px; padding: 8px 11px;
+  border: 1px solid var(--line2); border-radius: 9px; background: var(--surface); color: var(--fg); font-size: 13px; }
+.dpat-input:focus-visible, .dpat-select:focus-visible, .dpat-textarea:focus-visible {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(77,107,254,.12); }
+.dpat-textarea { resize: vertical; min-height: 72px; line-height: 1.6; }
+.dpat-inputUnit { position: relative; }
+.dpat-inputUnit input { padding-right: 36px; }
+.dpat-inputUnit span { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--fg3); }
+.dpat-select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4.5 6 8.5 10 4.5' fill='none' stroke='%2398a2b3' stroke-width='1.4' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 11px center; padding-right: 30px; }
+
+/* 拖拽区 */
+.dpat-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  min-height: 148px; padding: 20px; border: 1.5px dashed var(--line2); border-radius: var(--r);
+  background: var(--surface2); text-align: center; cursor: pointer; }
+.dpat-drop:hover { border-color: var(--accent); background: #f6f8ff; }
+.dpat-drop svg { color: var(--accent); margin-bottom: 4px; }
+.dpat-drop strong { font-size: 13px; font-weight: 600; }
+.dpat-drop span { font-size: 12px; color: var(--fg3); }
+.dpat-fileList { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.dpat-file { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 13px; }
+.dpat-file svg { color: var(--fg3); flex: none; }
+.dpat-file .size { margin-left: auto; color: var(--fg3); font-size: 12px; }
+.dpat-file .x { border: 0; background: transparent; color: var(--fg3); font-size: 16px; line-height: 1; padding: 2px 4px; }
+.dpat-file .x:hover { color: var(--bad); }
+
+/* 通用小组件 */
+.dpat-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 550; background: var(--surface2); color: var(--fg2); border: 1px solid var(--line); }
+.dpat-chip-blue { color: #3350d8; border-color: #cfd8ff; background: #f3f5ff; }
+.dpat-chip-ok { color: #0f7a4a; border-color: #bfe7d1; background: #f0faf4; }
+.dpat-chip-warn { color: #a5690a; border-color: #f2ddae; background: #fff9ec; }
+.dpat-chip-bad { color: #b53737; border-color: #f2c9c9; background: #fff4f4; }
+.dpat-tip { display: flex; align-items: flex-start; gap: 9px; margin-top: 16px; padding: 11px 14px;
+  border-radius: 10px; background: #fff9ec; border: 1px solid #f4e5c2; font-size: 12px; color: #7a5a1c; }
+.dpat-tip.info { background: #f3f5ff; border-color: #dbe2ff; color: #3a4f9e; }
+.dpat-tip b { font-weight: 650; }
+.dpat-deliver { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.dpat-deliverItem { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+  border-radius: 10px; background: var(--surface2); font-size: 12px; }
+.dpat-deliverItem i { flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 600; }
+
+/* 用例列表 */
+.dpat-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.dpat-seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--dsw-alias-bg-module-platform, #eef1f6); }
+.dpat-seg button { border: 0; background: transparent; height: 28px; padding: 0 13px; border-radius: 7px; font-size: 12px; color: var(--fg2); }
+.dpat-seg button[aria-selected="true"] { background: var(--surface); color: var(--fg); font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,.07); }
+.dpat-search { height: 34px; width: 220px; padding: 0 11px; border: 1px solid var(--line2); border-radius: 9px; background: var(--surface); font-size: 13px; }
+.dpat-statLine { display: flex; gap: 22px; margin-bottom: 16px; font-size: 12px; color: var(--fg2); }
+.dpat-statLine b { color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
+.dpat-caseList { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); overflow: hidden; }
+.dpat-caseRow { display: grid; grid-template-columns: minmax(0, 1fr) 88px 72px 96px 96px 28px; align-items: center;
+  gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.dpat-caseRow:last-child { border-bottom: 0; }
+.dpat-caseRow:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(20,30,50,.04)); }
+.dpat-caseRow[aria-expanded="true"] { background: #f8faff; }
+.dpat-caseName { font-size: 13px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dpat-caseName small { display: block; font-weight: 400; color: var(--fg3); font-size: 11px; }
+.dpat-cell { font-size: 12px; color: var(--fg2); white-space: nowrap; }
+.dpat-chevron { border: 0; background: transparent; color: var(--fg3); padding: 0; font-size: 12px; }
+.dpat-caseDetail { padding: 18px 20px 20px; border-top: 1px solid var(--line); background: #fbfcfe; }
+.dpat-caseDetail[hidden] { display: none !important; }
+.dpat-detailGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; }
+.dpat-stepsList { list-style: none; padding: 0; margin: 8px 0 0; counter-reset: s; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.dpat-stepsList li { counter-increment: s; display: flex; gap: 8px; font-size: 12px; color: var(--fg2); }
+.dpat-stepsList li::before { content: counter(s); flex: none; width: 18px; height: 18px; border-radius: 5px;
+  background: var(--surface2); color: var(--fg2); display: grid; place-items: center; font-size: 10px; font-weight: 600; }
+.dpat-checks { display: flex; gap: 16px; margin-top: 12px; font-size: 12px; color: var(--fg2); flex-wrap: wrap; }
+.dpat-checks label { display: flex; align-items: center; gap: 6px; }
+.dpat-checks input { accent-color: var(--accent); }
+
+/* 模型执行 */
+.dpat-runCard { padding: 24px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.dpat-runTop { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.dpat-runTop .txt { min-width: 0; }
+.dpat-runTop h3 { font-size: 15px; font-weight: 650; }
+.dpat-runTop p { margin-top: 4px; font-size: 12px; color: var(--fg2); }
+.dpat-runActions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.dpat-engine { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--fg2);
+  padding: 6px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface2); }
+.dpat-engine i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.dpat-pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; margin: 26px 0 8px; }
+.dpat-pipeItem { position: relative; text-align: center; font-size: 12px; color: var(--fg3); }
+.dpat-pipeItem::before { content: ""; position: absolute; top: 13px; left: 50%; width: 100%; height: 1px; background: var(--line2); }
+.dpat-pipeItem:last-child::before { display: none; }
+.dpat-pipeDot { position: relative; z-index: 1; width: 26px; height: 26px; margin: 0 auto 9px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line2);
+  font-size: 11px; font-weight: 600; color: var(--fg3); }
+.dpat-pipeItem[data-state="done"] .dpat-pipeDot { background: var(--ok); border-color: var(--ok); color: #fff; }
+.dpat-pipeItem[data-state="active"] .dpat-pipeDot { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 0 4px rgba(77,107,254,.13); }
+.dpat-pipeItem[data-state="done"], .dpat-pipeItem[data-state="active"] { color: var(--fg); font-weight: 550; }
+.dpat-prompt { margin-top: 20px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface2); }
+.dpat-prompt summary { cursor: pointer; font-size: 12px; color: var(--fg2); font-weight: 550; }
+.dpat-prompt pre { margin: 12px 0 0; padding: 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line);
+  font: 11px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg2); white-space: pre-wrap; max-height: 150px; overflow: auto; }
+.dpat-result { margin-top: 16px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.dpat-result[hidden] { display: none !important; }
+.dpat-resultHead { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--surface2); font-size: 12px; font-weight: 600; }
+.dpat-resultHead .right { margin-left: auto; font-weight: 400; color: var(--fg2); }
+.dpat-result table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dpat-result th, .dpat-result td { text-align: left; padding: 9px 14px; border-top: 1px solid var(--line); }
+.dpat-result th { color: var(--fg3); font-weight: 550; }
+.dpat-result td:last-child { text-align: right; }
+
+/* 缺陷页 */
+.dpat-triage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.dpat-triageItem { padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.dpat-triageItem h4 { font-size: 13px; font-weight: 650; margin-bottom: 5px; }
+.dpat-triageItem p { font-size: 12px; color: var(--fg2); }
+.dpat-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 54px 20px 60px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); text-align: center; }
+.dpat-empty svg { color: #c7cfdb; }
+.dpat-empty p { font-size: 13px; color: var(--fg2); }
+.dpat-empty span { font-size: 12px; color: var(--fg3); }
+.dpat-lifecycle { display: flex; align-items: center; gap: 0; margin-top: 16px; flex-wrap: wrap; }
+.dpat-lifecycle span { font-size: 12px; color: var(--fg3); padding: 5px 12px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); margin-right: 22px; position: relative; }
+.dpat-lifecycle span:not(:last-child)::after { content: "→"; position: absolute; right: -18px; color: var(--fg3); }
+
+/* 底栏 */
+.dpat-foot { display: flex; align-items: center; gap: 10px; padding: 12px 28px; border-top: 1px solid var(--line);
+  background: var(--surface); font-size: 11px; color: var(--fg3); }
+.dpat-foot code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg2); }
+.dpat-foot a { margin-left: auto; color: var(--accent); text-decoration: none; }
+
+/* ---------- 设计规范区 ---------- */
+.spec { background: #fff; border: 1px solid #dde2ea; border-radius: 16px; padding: 28px 32px 36px; }
+.spec h2 { margin: 0 0 6px; font-size: 18px; font-weight: 650; }
+.spec h3 { margin: 32px 0 12px; font-size: 14px; font-weight: 650; }
+.spec > p.lead { margin: 0; font-size: 13px; color: #5f6b7a; }
+.palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+.swatch { border: 1px solid #e6e9ee; border-radius: 10px; overflow: hidden; }
+.swatch .block { height: 52px; }
+.swatch .txt { padding: 8px 10px; font-size: 11px; line-height: 1.5; }
+.swatch b { display: block; font-size: 12px; font-weight: 600; }
+.swatch code { color: #7b8797; font-size: 10px; }
+table.specTable { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.specTable.cols3 { table-layout: fixed; }
+table.specTable.cols3 th:first-child { width: 22%; }
+table.specTable.cols3 th:nth-child(2) { width: 30%; }
+table.specTable th, table.specTable td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eef1f5; vertical-align: top; }
+table.specTable th { color: #7b8797; font-weight: 550; font-size: 12px; background: #fafbfd; }
+table.specTable td code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f4f6f9; padding: 2px 5px; border-radius: 4px; }
+.specGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.ruleList { margin: 0; padding-left: 18px; font-size: 13px; color: #3d4757; }
+.ruleList li { margin-bottom: 8px; }
+.ruleList code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f4f6f9; padding: 2px 5px; border-radius: 4px; }
+
+@media (max-width: 900px) {
+  .page { padding: 20px 16px 60px; }
+  .dpat-grid2, .dpat-detailGrid, .specGrid { grid-template-columns: 1fr; }
+  .dpat-grid3, .dpat-triage, .dpat-deliver { grid-template-columns: 1fr; }
+  .dpat-kpi { flex-wrap: wrap; gap: 12px 0; }
+  .dpat-caseRow { grid-template-columns: minmax(0, 1fr) 72px 96px 28px; }
+  .dpat-caseRow .hideSm { display: none; }
+  .dpat-pipeline { grid-template-columns: repeat(5, 1fr); }
+  .dpat-pipeItem { font-size: 10px; }
+  /* 窄窗口兜底：左侧导航降为顶部 2 列，避免主区被压到不可用 */
+  .dpat-body { grid-template-columns: 1fr; }
+  .dpat-steps { flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 12px;
+    border-right: 0; border-bottom: 1px solid var(--line); }
+  .dpat-navGroup, .dpat-navFoot { display: none; }
+  .dpat-stepItem { width: auto; flex: 1 1 calc(50% - 4px); }
+  .dpat-stepItem::after { display: none; }
+}
+@media (max-width: 720px) {
+  .dpat-stepItem { flex-basis: 100%; }
+  .dpat-brandSub { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="docHead">
+    <div>
+      <h1 class="docTitle">自动化测试工作台 · UI 设计稿</h1>
+      <p class="docSub">面向 DSH 插件（DeepSeek Harness）的浅色改版：阶段导航收进左侧，1 产品文档 / 2 测试用例归「准备」组常驻，顶部只留工作区操作。</p>
+    </div>
+    <div class="docMeta">
+      <span class="docTag brand">DeepSeek Harness 兼容</span>
+      <span class="docTag">浅色 / 大方简单</span>
+      <span class="docTag">左侧阶段导航</span>
+      <span class="docTag">v1.1 · 2026-11-15</span>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-view="ui">界面预览</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="spec">设计规范与兼容约束</button>
+  </div>
+
+  <!-- ==================== 界面预览 ==================== -->
+  <section class="view" id="view-ui">
+    <div class="preview">
+      <div class="dpat-root">
+
+        <!-- 顶栏 -->
+        <div class="dpat-topbar">
+          <div class="dpat-brand">
+            <span class="dpat-brandIcon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 4.5h10M3 8h7M3 11.5h4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </span>
+            <span class="dpat-brandName">自动化测试</span>
+            <span class="dpat-brandSub">需求 → 用例 → 执行 → 缺陷</span>
+          </div>
+          <div class="dpat-topRight">
+            <button class="dpat-workspace">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 6h12" stroke="currentColor" stroke-width="1.3"/></svg>
+              dsh-project-autotest
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 4.5 6 8.5 10 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            </button>
+            <span class="dpat-saved"><i></i>已保存</span>
+            <button class="dpat-btn">导入</button>
+            <button class="dpat-btn dpat-btn-primary">导出</button>
+          </div>
+        </div>
+
+        <!-- 主体：左侧阶段导航 + 右侧内容 -->
+        <div class="dpat-body">
+
+        <!-- 唯一的进度指示：1 产品文档 / 2 测试用例常驻左侧「准备」组，顶部不再放阶段 -->
+        <nav class="dpat-steps" aria-label="流程阶段">
+          <div class="dpat-navGroup">准备 · 输入</div>
+          <button class="dpat-stepItem" data-stage="1" aria-current="step">
+            <span class="dpat-stepNo">1</span>
+            <span class="dpat-stepText"><span class="dpat-stepTitle">产品文档 / 技术方案</span><span class="dpat-stepState">人工 · 进行中</span></span>
+          </button>
+          <button class="dpat-stepItem" data-stage="2">
+            <span class="dpat-stepNo">2</span>
+            <span class="dpat-stepText"><span class="dpat-stepTitle">设计测试用例或导入</span><span class="dpat-stepState">人工 · 未开始</span></span>
+          </button>
+          <div class="dpat-navGroup dpat-navGroupGap">执行与验收</div>
+          <button class="dpat-stepItem" data-stage="3">
+            <span class="dpat-stepNo">3</span>
+            <span class="dpat-stepText"><span class="dpat-stepTitle">编写并执行测试脚本</span><span class="dpat-stepState">模型自动 · 未开始</span></span>
+          </button>
+          <button class="dpat-stepItem" data-stage="4">
+            <span class="dpat-stepNo">4</span>
+            <span class="dpat-stepText"><span class="dpat-stepTitle">跟踪测试 Bug</span><span class="dpat-stepState">人工评审 · 未开始</span></span>
+          </button>
+          <div class="dpat-navFoot">
+            <div class="dpat-navFootRow"><span>流程进度</span><b>0 / 4</b></div>
+            <span class="dpat-navTrack"><span class="dpat-navFill" style="width:0%"></span></span>
+            <p>docs/autotest/<br>project.json</p>
+          </div>
+        </nav>
+
+        <div class="dpat-content">
+
+        <!-- 一行概览 -->
+        <div class="dpat-kpi">
+          <div class="dpat-kpiItem"><span class="dpat-kpiNum">80%</span><span class="dpat-kpiLabel">覆盖率目标</span></div>
+          <div class="dpat-kpiItem"><span class="dpat-kpiNum">17</span><span class="dpat-kpiLabel">用例</span></div>
+          <div class="dpat-kpiItem"><span class="dpat-kpiNum">0</span><span class="dpat-kpiLabel">已执行</span></div>
+          <div class="dpat-kpiItem"><span class="dpat-kpiNum">0</span><span class="dpat-kpiLabel">缺陷</span></div>
+          <span class="dpat-kpiNote">当前阶段 1 / 4</span>
+        </div>
+
+        <main class="dpat-main">
+          <div class="dpat-wrap">
+
+            <!-- ① 需求 -->
+            <section class="dpat-stage" data-stage="1">
+              <header class="dpat-stageHead">
+                <div>
+                  <h2>产品文档 / 技术方案</h2>
+                  <p>把需求与技术方案放进工作区，让「测什么」有唯一出处。</p>
+                </div>
+                <span class="dpat-owner">人工</span>
+              </header>
+
+              <div class="dpat-grid2">
+                <div class="dpat-card">
+                  <div class="dpat-cardHead"><h3>输入文档</h3><span class="right">保存到 docs/autotest/inputs/</span></div>
+                  <label class="dpat-drop">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <strong>拖拽文件到这里，或点击选择</strong>
+                    <span>支持 .md / .txt / .json / .yaml / .csv / .html</span>
+                  </label>
+                  <ul class="dpat-fileList">
+                    <li class="dpat-file">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2h5l3 3v9H4z" stroke="currentColor" stroke-width="1.2"/><path d="M9 2v3h3" stroke="currentColor" stroke-width="1.2"/></svg>
+                      PRD-v2.md <span class="size">24 KB</span><button class="x" aria-label="移除">×</button>
+                    </li>
+                    <li class="dpat-file">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 2h5l3 3v9H4z" stroke="currentColor" stroke-width="1.2"/><path d="M9 2v3h3" stroke="currentColor" stroke-width="1.2"/></svg>
+                      tech-design-api.md <span class="size">18 KB</span><button class="x" aria-label="移除">×</button>
+                    </li>
+                  </ul>
+                </div>
+
+                <div class="dpat-card">
+                  <div class="dpat-cardHead"><h3>测试目标</h3></div>
+                  <div class="dpat-field">
+                    <label class="dpat-label" for="coverage">覆盖率目标</label>
+                    <div class="dpat-inputUnit"><input class="dpat-input" id="coverage" value="80" inputmode="numeric"><span>%</span></div>
+                  </div>
+                  <div class="dpat-field">
+                    <label class="dpat-label" for="level">自动化粒度</label>
+                    <select class="dpat-select" id="level"><option>接口级（推荐）</option><option>UI 级</option><option>接口级 + UI 级</option></select>
+                  </div>
+                  <p class="dpat-note">接口级优先；UI 级仅覆盖主流程，避免脚本脆弱。需求变更时替换文档并重新生成用例。</p>
+                </div>
+              </div>
+
+              <div class="dpat-card" style="margin-top:16px">
+                <div class="dpat-cardHead"><h3>本阶段交付</h3><span class="right">3 项</span></div>
+                <div class="dpat-deliver">
+                  <div class="dpat-deliverItem"><i>1</i><span>功能点清单与优先级</span></div>
+                  <div class="dpat-deliverItem"><i>2</i><span>不做自动化的范围</span></div>
+                  <div class="dpat-deliverItem"><i>3</i><span>覆盖率目标与粒度</span></div>
+                </div>
+              </div>
+
+              <div class="dpat-tip"><b>提示</b><span>需求散落在聊天记录和截图里，模型读不到，用例设计就只能靠猜。</span></div>
+            </section>
+
+            <!-- ② 用例 -->
+            <section class="dpat-stage" data-stage="2" hidden>
+              <header class="dpat-stageHead">
+                <div>
+                  <h2>设计测试用例或导入</h2>
+                  <p>把功能点翻译成可执行、可断言的用例。正向优先，反向靠边界分析筛出。</p>
+                </div>
+                <span class="dpat-owner">人工</span>
+              </header>
+
+              <div class="dpat-toolbar">
+                <div class="dpat-seg">
+                  <button aria-selected="true">正向用例 17</button><button aria-selected="false">反向用例 0</button>
+                </div>
+                <input class="dpat-search" placeholder="搜索用例…">
+                <span class="dpat-note" style="margin-left:auto">17 条待补全预期结果</span>
+                <button class="dpat-btn dpat-btn-primary">+ 新增用例</button>
+              </div>
+
+              <div class="dpat-caseList">
+                <div class="dpat-caseRow" aria-expanded="true" data-case="1">
+                  <div class="dpat-caseName">public 业务技能（10）<small>10 个操作步骤 · 待补全预期</small></div>
+                  <div class="dpat-cell">功能</div>
+                  <div class="dpat-cell hideSm">10 步</div>
+                  <div class="dpat-cell hideSm"><span class="dpat-chip dpat-chip-warn">预期待补</span></div>
+                  <div class="dpat-cell"><span class="dpat-chip">未执行</span></div>
+                  <button class="dpat-chevron" aria-label="展开">⌄</button>
+                </div>
+                <div class="dpat-caseDetail" data-case="1">
+                  <div class="dpat-detailGrid">
+                    <div>
+                      <span class="dpat-label">前置条件</span>
+                      <input class="dpat-input" style="margin-top:7px" placeholder="例：已登录、已选中测试数据集">
+                      <span class="dpat-label" style="display:block;margin-top:16px">操作步骤</span>
+                      <ol class="dpat-stepsList">
+                        <li>campus-helper</li><li>target-school-query</li><li>student-archive-query</li>
+                        <li>student-progress-track</li><li>student-tier-track</li><li>knowledge-search</li>
+                        <li>knowledge-manager</li><li>attachment-campus-intake</li><li>yach-weekly-search</li><li>jiaoyanyun</li>
+                      </ol>
+                    </div>
+                    <div>
+                      <span class="dpat-label">预期结果（必须可断言）</span>
+                      <textarea class="dpat-textarea" style="margin-top:7px" placeholder="例：HTTP 200；返回字段 status = success；列表长度为 10"></textarea>
+                      <span class="dpat-label" style="display:block;margin-top:16px">执行结果</span>
+                      <select class="dpat-select" style="margin-top:7px"><option>未执行</option><option>通过</option><option>失败</option></select>
+                      <div class="dpat-checks">
+                        <label><input type="checkbox"> 正确版本上通过</label>
+                        <label><input type="checkbox"> 缺陷版本上失败</label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="dpat-caseRow" aria-expanded="false" data-case="2">
+                  <div class="dpat-caseName">system 全员技能（2 带用例 / 5 格式技能）<small>3 个操作步骤 · 待补全预期</small></div>
+                  <div class="dpat-cell">功能</div><div class="dpat-cell hideSm">3 步</div>
+                  <div class="dpat-cell hideSm"><span class="dpat-chip dpat-chip-warn">预期待补</span></div>
+                  <div class="dpat-cell"><span class="dpat-chip">未执行</span></div>
+                  <button class="dpat-chevron" aria-label="展开">⌄</button>
+                </div>
+                <div class="dpat-caseDetail" data-case="2" hidden>
+                  <div class="dpat-detailGrid">
+                    <div><span class="dpat-label">操作步骤</span><ol class="dpat-stepsList"><li>yach-doc</li><li>office-attachment-parse</li><li>docx / xlsx / pptx / pdf 格式技能</li></ol></div>
+                    <div><span class="dpat-label">预期结果</span><textarea class="dpat-textarea" style="margin-top:7px" placeholder="写明状态码、返回字段或页面文案"></textarea></div>
+                  </div>
+                </div>
+
+                <div class="dpat-caseRow" aria-expanded="false" data-case="3">
+                  <div class="dpat-caseName">系统基线<small>1 个操作步骤</small></div>
+                  <div class="dpat-cell">功能</div><div class="dpat-cell hideSm">1 步</div>
+                  <div class="dpat-cell hideSm"><span class="dpat-chip dpat-chip-warn">预期待补</span></div>
+                  <div class="dpat-cell"><span class="dpat-chip">未执行</span></div>
+                  <button class="dpat-chevron" aria-label="展开">⌄</button>
+                </div>
+                <div class="dpat-caseDetail" data-case="3" hidden>
+                  <div class="dpat-detailGrid">
+                    <div><span class="dpat-label">操作步骤</span><ol class="dpat-stepsList"><li>技能体系基线 SYS 用例</li></ol></div>
+                    <div><span class="dpat-label">预期结果</span><textarea class="dpat-textarea" style="margin-top:7px" placeholder="写明状态码、返回字段或页面文案"></textarea></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dpat-tip info"><b>规则</b><span>预期结果必须可断言（状态码、返回字段、页面文案）；模型以它为唯一通过 / 失败判据。支持从 XMind、Markdown、CSV 导入，导入后先预览再落盘。</span></div>
+            </section>
+
+            <!-- ③ 模型执行 -->
+            <section class="dpat-stage" data-stage="3" hidden>
+              <header class="dpat-stageHead">
+                <div>
+                  <h2>编写并执行测试脚本</h2>
+                  <p>由 DeepSeek Harness 的模型会话读取用例、编写脚本、执行并回填结果，人工不写代码。</p>
+                </div>
+                <span class="dpat-owner dpat-owner-model">模型自动</span>
+              </header>
+
+              <div class="dpat-runCard">
+                <div class="dpat-runTop">
+                  <div class="txt">
+                    <h3>开始一轮自动化测试</h3>
+                    <p>共 17 条用例 · 执行前会先保存当前项目，保证模型读到的文档与页面一致。</p>
+                  </div>
+                  <div class="dpat-runActions">
+                    <span class="dpat-engine" id="engineState"><i></i>DeepSeek Harness · 就绪</span>
+                    <button class="dpat-btn dpat-btn-primary dpat-btn-lg" id="runBtn">
+                      <svg width="13" height="13" viewBox="0 0 12 12" fill="none" style="vertical-align:-1px;margin-right:5px"><path d="M3 1.8v8.4L10 6z" fill="currentColor"/></svg>
+                      开始测试
+                    </button>
+                  </div>
+                </div>
+
+                <div class="dpat-pipeline" id="pipeline">
+                  <div class="dpat-pipeItem" data-state="idle"><div class="dpat-pipeDot">1</div>读取用例</div>
+                  <div class="dpat-pipeItem" data-state="idle"><div class="dpat-pipeDot">2</div>选框架 / 写脚本</div>
+                  <div class="dpat-pipeItem" data-state="idle"><div class="dpat-pipeDot">3</div>执行脚本</div>
+                  <div class="dpat-pipeItem" data-state="idle"><div class="dpat-pipeDot">4</div>脚本自检</div>
+                  <div class="dpat-pipeItem" data-state="idle"><div class="dpat-pipeDot">5</div>回填结果</div>
+                </div>
+
+                <details class="dpat-prompt">
+                  <summary>查看下发给模型的指令（runPrompt）</summary>
+                  <pre>请按 docs/autotest/project.json 中的用例执行自动化测试：
+1. 逐条读取前置条件、操作步骤与预期结果，预期为空的用例先标记 blocked；
+2. 选择测试框架并编写脚本，脚本入库后先自检：正确版本通过、缺陷版本失败，两条成立才算可信；
+3. 执行全部用例，将每条的 result 与 failReason（product / script / environment）回填到项目文档；
+4. 输出简要报告：通过数、失败数、归因分布与待人工评审项。
+只回填结论，不要修改用例定义。数据以磁盘上的 project.json 为准。</pre>
+                </details>
+
+                <div class="dpat-result" id="runResult" hidden>
+                  <div class="dpat-resultHead">执行结果 <span class="right" id="resultSummary">17 条 · 通过 15 · 失败 2 · 会话 s-9f2a</span></div>
+                  <table>
+                    <thead><tr><th>用例</th><th>结果</th><th>失败归因</th><th>耗时</th></tr></thead>
+                    <tbody>
+                      <tr><td>public 业务技能（10）</td><td><span class="dpat-chip dpat-chip-ok">通过</span></td><td>—</td><td>12.4 s</td></tr>
+                      <tr><td>system 全员技能</td><td><span class="dpat-chip dpat-chip-bad">失败</span></td><td>产品</td><td>8.1 s</td></tr>
+                      <tr><td>跨技能编排与端到端</td><td><span class="dpat-chip dpat-chip-warn">待评审</span></td><td>环境</td><td>6.7 s</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="dpat-tip"><b>自检门槛</b><span>脚本要在正确版本上通过、在缺陷版本上失败；两条都成立才算可信，否则脚本自身的问题会被当成产品缺陷。</span></div>
+            </section>
+
+            <!-- ④ 缺陷 -->
+            <section class="dpat-stage" data-stage="4" hidden>
+              <header class="dpat-stageHead">
+                <div>
+                  <h2>跟踪测试 Bug</h2>
+                  <p>模型给出失败结论并归因，人工确认是产品缺陷后提单，修复后回归闭环。</p>
+                </div>
+                <span class="dpat-owner dpat-owner-review">人工评审</span>
+              </header>
+
+              <div class="dpat-triage" style="margin-bottom:16px">
+                <div class="dpat-triageItem"><h4>产品缺陷</h4><p>确认成立 → 记录缺陷，转开发修复。</p></div>
+                <div class="dpat-triageItem"><h4>脚本问题</h4><p>模型修正脚本后重跑，不提缺陷单。</p></div>
+                <div class="dpat-triageItem"><h4>环境问题</h4><p>重建环境后重跑，不提缺陷单。</p></div>
+              </div>
+
+              <div class="dpat-toolbar">
+                <div class="dpat-statLine" style="margin:0"><span>缺陷 <b>0</b></span><span>待归因失败 <b>0</b></span><span>待回归 <b>0</b></span></div>
+                <button class="dpat-btn dpat-btn-primary" style="margin-left:auto">+ 记录缺陷</button>
+              </div>
+
+              <div class="dpat-empty">
+                <svg width="46" height="46" viewBox="0 0 48 48" fill="none"><rect x="9" y="7" width="30" height="34" rx="4" stroke="currentColor" stroke-width="1.6"/><path d="M16 17h16M16 24h12M16 31h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                <p>还没有缺陷记录</p>
+                <span>执行阶段结束后，确认成立的产品缺陷会出现在这里。</span>
+              </div>
+
+              <div class="dpat-lifecycle">
+                <span>待处理</span><span>处理中</span><span>已解决</span><span>回归中</span><span>已关闭</span>
+              </div>
+
+              <div class="dpat-tip info" style="margin-top:16px"><b>闭环规则</b><span>修复方案若偏离原始需求，回归前先同步用例与脚本，否则回归结论不成立。</span></div>
+            </section>
+
+          </div>
+        </main>
+
+        <div class="dpat-foot">
+          存储位置 <code>docs/autotest/project.json</code>
+          <a href="#">存储位置设置</a>
+        </div>
+        </div><!-- /dpat-content -->
+        </div><!-- /dpat-body -->
+      </div>
+    </div>
+    <p class="caption">点击左侧阶段可切换（1 / 2 在「准备 · 输入」组）；用例行可展开；「开始测试」演示模型会话的执行状态流转。界面为纯静态原型，无外部依赖。</p>
+  </section>
+
+  <!-- ==================== 设计规范 ==================== -->
+  <section class="view spec" id="view-spec" hidden>
+    <h2>设计规范与 DSH 兼容约束</h2>
+    <p class="lead">设计目标：浅色、留白充足、每阶段一屏可读。核心改动是把原界面里「步骤条 + 左侧进度栏 + 标题编号 + 面包屑」四套重复进度收敛为一列左侧阶段导航 + 一行概览；1 产品文档 / 2 设计测试用例放在左侧「准备 · 输入」组，顶部不再承载阶段切换。</p>
+
+    <h3>色板（全部映射到 DSH 主题别名，右侧为浅色 fallback）</h3>
+    <div class="palette">
+      <div class="swatch"><div class="block" style="background:#f7f8fa"></div><div class="txt"><b>页面底</b><code>--dsw-alias-bg-base</code></div></div>
+      <div class="swatch"><div class="block" style="background:#ffffff;border-bottom:1px solid #e6e9ee"></div><div class="txt"><b>卡片 / 顶栏</b><code>--dsw-alias-bg-layer-1</code></div></div>
+      <div class="swatch"><div class="block" style="background:#f1f3f7"></div><div class="txt"><b>柔和块</b><code>--dsw-alias-bg-layer-2</code></div></div>
+      <div class="swatch"><div class="block" style="background:#e6e9ee"></div><div class="txt"><b>分隔线</b><code>--dsw-alias-border-l1</code></div></div>
+      <div class="swatch"><div class="block" style="background:#1b1f24"></div><div class="txt"><b>主文字</b><code>--dsw-alias-label-primary</code></div></div>
+      <div class="swatch"><div class="block" style="background:#5f6b7a"></div><div class="txt"><b>次文字</b><code>--dsw-alias-label-secondary</code></div></div>
+      <div class="swatch"><div class="block" style="background:#4d6bfe"></div><div class="txt"><b>品牌蓝（仅主按钮 / 当前步）</b><code>--dsw-alias-brand-primary</code></div></div>
+      <div class="swatch"><div class="block" style="background:#15a463"></div><div class="txt"><b>成功</b><code>--dsw-alias-state-success-primary</code></div></div>
+      <div class="swatch"><div class="block" style="background:#d98a0b"></div><div class="txt"><b>警告</b><code>--dsw-alias-state-warn-primary</code></div></div>
+      <div class="swatch"><div class="block" style="background:#dc4a4a"></div><div class="txt"><b>错误</b><code>--dsw-alias-state-error-primary</code></div></div>
+    </div>
+
+    <h3>排版与形状</h3>
+    <table class="specTable cols3">
+      <thead><tr><th>项目</th><th>取值</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>正文字号</td><td><code>14px / 1.6</code></td><td>原界面 11–12px 过密，正文放大到 14px，辅助信息最低 11px</td></tr>
+        <tr><td>标题层级</td><td><code>20 / 16 / 14 / 13px</code></td><td>阶段标题、卡片标题、控件文字</td></tr>
+        <tr><td>间距节奏</td><td><code>8 / 12 / 16 / 20 / 28px</code></td><td>卡片内 20–22px，卡片间 16px，主区左右 28px</td></tr>
+        <tr><td>圆角</td><td><code>12px（卡片）/ 9px（控件）/ 999px（徽标）</code></td><td>只保留一档主圆角，避免视觉噪声</td></tr>
+        <tr><td>内容宽度</td><td><code>max-width: 1080px</code>，居中</td><td>右列宽屏不拉伸，说明文字压缩为卡片下的一行提示</td></tr>
+        <tr><td>左侧导航</td><td><code>232px</code>，分「准备 · 输入 / 执行与验收」两组</td><td>1 产品文档、2 设计测试用例常驻左上，主区不再被顶部步骤条占高</td></tr>
+        <tr><td>字体</td><td>系统字体栈</td><td>不加载外部字体，DSH 宿主字体自动继承</td></tr>
+      </tbody>
+    </table>
+
+    <h3>与原界面的改动对照</h3>
+    <table class="specTable">
+      <thead><tr><th>原界面问题</th><th>改版处理</th></tr></thead>
+      <tbody>
+        <tr><td>四套进度指示（路径面包屑 + 步骤条 + 左侧进度栏 + 标题编号）重复占位</td><td>只保留一列可点击的左侧阶段导航 + 1 行 KPI；路径收进底栏一行</td></tr>
+        <tr><td>阶段切换放在顶部，1 产品文档 / 2 设计测试用例与执行阶段混排，准备工作没有独立入口</td><td>四个阶段整体移到左侧 232px 导航；1 / 2 归入「准备 · 输入」组常驻左上，3 / 4 归入「执行与验收」组，顶部只留工作区操作</td></tr>
+        <tr><td>用例卡片平铺 10 条步骤，一屏放不下 2 条用例</td><td>紧凑列表行 + 点击展开详情；预期结果缺失去「预期待补」标签统一提示</td></tr>
+        <tr><td>说明 / 要点 / 常见坑三套长文案堆叠，主操作不突出</td><td>每阶段只留 1 句摘要 + 1 条提示，主操作按钮固定在阶段头部或工具条</td></tr>
+        <tr><td>黑色按钮、绿色左边框、黄色警示条三套视觉语言混用</td><td>统一为品牌蓝主按钮、描边次按钮、语义色只用小徽标与提示条</td></tr>
+      </tbody>
+    </table>
+
+    <div class="specGrid">
+      <div>
+        <h3>DeepSeek Harness / DSH 兼容约束（必须遵守）</h3>
+        <ol class="ruleList">
+          <li>单个 <code>&lt;style data-plugin-css&gt;</code> 注入，键名沿用 <code>dsh-project-autotest/flow.css</code>；所有类名以 <code>.dpat-</code> 前缀隔离，不污染宿主。</li>
+          <li>所有颜色写 <code>var(--dsw-alias-*, 浅色 fallback)</code>。本设计稿的 <code>:root</code> 仅用于独立预览，移植时删除，由宿主主题接管；宿主切深色也不会破版。</li>
+          <li>不引入 CDN、外部字体、图片文件或第三方 UI 库；图标全部内联 SVG。纯 React <code>h()</code> 调用 + 原生 JS 即可复现，不依赖打包器新增依赖。</li>
+          <li>模型执行走宿主会话：<code>startRun(workspaceId, locale)</code> 下发 <code>runPrompt</code> 给 DeepSeek Agent。<b>UI 不自行调用模型 API、不设计 API Key / Base URL 配置</b>，只展示会话就绪状态与下发的指令。</li>
+          <li>执行前先 <code>persist(project)</code>：模型读磁盘上的 <code>project.json</code>，页面与磁盘必须一致。结果由模型回填，UI 只读取渲染。</li>
+          <li>文案走 <code>locales.ts</code> 的 zh / en 键值；宿主不可达或版本过旧时显示既有 <code>wb.hostUnreachable / wb.hostStale</code> 提示，不另造状态。</li>
+          <li>数据字段沿用现有模型：<code>coverageTarget</code>、<code>automationLevel</code>、<code>cases[]</code>（kind / technique / steps / expected / result / failReason / selfCheck）、<code>defects[]</code>。设计稿不新增存储字段。</li>
+          <li>左侧阶段导航是 <code>main</code> 区内部的 CSS 两列布局（<code>.dpat-body</code>），不是新增宿主侧栏；宿主 slot 注册不变：<code>sidebar.panellist</code> + <code>main</code>，<code>cordis.patch.yml</code> 与 <code>dsh.client.inject</code> 不改。</li>
+          <li>窄窗口（<code>max-width: 900px</code>）下左列降为顶部 2 列导航、隐藏分组与脚注，保证主区可用；这是唯一允许阶段出现在顶部的断点，桌面态一律在左侧。</li>
+        </ol>
+      </div>
+      <div>
+        <h3>组件清单（可直接对照 styles.ts 落地）</h3>
+        <table class="specTable cols3">
+          <thead><tr><th>组件</th><th>类名</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td>顶栏</td><td><code>.dpat-topbar</code></td><td>工作区 / 已保存 / 导入 / 导出</td></tr>
+            <tr><td>左侧阶段导航</td><td><code>.dpat-body / .dpat-steps / .dpat-stepItem</code></td><td>232px，current / done / idle</td></tr>
+            <tr><td>导航分组 + 进度脚注</td><td><code>.dpat-navGroup / .dpat-navFoot</code></td><td>准备 · 输入 / 执行与验收</td></tr>
+            <tr><td>概览条</td><td><code>.dpat-kpi</code></td><td>右列顶部，4 项数值</td></tr>
+            <tr><td>卡片 / 控件</td><td><code>.dpat-card / .dpat-input / .dpat-select</code></td><td>hover / focus-visible</td></tr>
+            <tr><td>拖拽区 + 文件行</td><td><code>.dpat-drop / .dpat-file</code></td><td>hover / active / 移除</td></tr>
+            <tr><td>用例行（可展开）</td><td><code>.dpat-caseRow / .dpat-caseDetail</code></td><td>expanded / collapsed</td></tr>
+            <tr><td>模型执行卡</td><td><code>.dpat-runCard / .dpat-pipeline</code></td><td>idle / active / done</td></tr>
+            <tr><td>指令折叠区</td><td><code>.dpat-prompt</code></td><td>对应 runPrompt</td></tr>
+            <tr><td>徽标 / 提示条</td><td><code>.dpat-chip / .dpat-tip</code></td><td>ok / warn / bad / info</td></tr>
+            <tr><td>空状态</td><td><code>.dpat-empty</code></td><td>缺陷为 0 时</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  // 设计稿 Tab
+  document.querySelectorAll('.tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (x) { x.setAttribute('aria-selected', String(x === tab)); });
+      document.getElementById('view-ui').hidden = tab.dataset.view !== 'ui';
+      document.getElementById('view-spec').hidden = tab.dataset.view !== 'spec';
+    });
+  });
+
+  // 阶段切换
+  var stepItems = document.querySelectorAll('.dpat-stepItem');
+  var stages = document.querySelectorAll('.dpat-stage');
+  function showStage(n) {
+    stepItems.forEach(function (item) {
+      if (item.getAttribute('data-stage') === String(n)) item.setAttribute('aria-current', 'step');
+      else item.removeAttribute('aria-current');
+    });
+    stages.forEach(function (s) { s.hidden = s.getAttribute('data-stage') !== String(n); });
+    var note = document.querySelector('.dpat-kpiNote');
+    if (note) note.textContent = '当前阶段 ' + n + ' / 4';
+  }
+  stepItems.forEach(function (item) {
+    item.addEventListener('click', function () { showStage(item.getAttribute('data-stage')); });
+  });
+
+  // 用例行展开
+  document.querySelectorAll('.dpat-caseRow').forEach(function (row) {
+    row.addEventListener('click', function () {
+      var id = row.getAttribute('data-case');
+      var detail = document.querySelector('.dpat-caseDetail[data-case="' + id + '"]');
+      var open = row.getAttribute('aria-expanded') === 'true';
+      row.setAttribute('aria-expanded', String(!open));
+      if (detail) detail.hidden = open;
+    });
+  });
+
+  // 分桶按钮（纯视觉）
+  document.querySelectorAll('.dpat-seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.dpat-seg button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+    });
+  });
+
+  // 模型会话执行演示：体现「宿主会话」而非前端自调 API
+  var runBtn = document.getElementById('runBtn');
+  var engine = document.getElementById('engineState');
+  var pipes = document.querySelectorAll('.dpat-pipeItem');
+  var result = document.getElementById('runResult');
+  var timer = null;
+  runBtn.addEventListener('click', function () {
+    if (timer) return;
+    runBtn.disabled = true;
+    runBtn.textContent = '执行中…';
+    engine.innerHTML = '<i></i>DeepSeek Harness · 会话进行中';
+    result.hidden = true;
+    pipes.forEach(function (p) { p.setAttribute('data-state', 'idle'); });
+    var i = 0;
+    timer = setInterval(function () {
+      pipes.forEach(function (p, idx) {
+        p.setAttribute('data-state', idx < i ? 'done' : idx === i ? 'active' : 'idle');
+      });
+      i += 1;
+      if (i >= pipes.length) {
+        clearInterval(timer); timer = null;
+        pipes.forEach(function (p) { p.setAttribute('data-state', 'done'); });
+        engine.innerHTML = '<i></i>DeepSeek Harness · 已回填';
+        runBtn.disabled = false;
+        runBtn.textContent = '重新测试';
+        result.hidden = false;
+      }
+    }, 480);
+  });
+
+  // 支持 ?stage=2 / ?view=spec 直接预览指定阶段或规范页
+  var params = new URLSearchParams(location.search);
+  var initialStage = params.get('stage');
+  if (initialStage && ['1', '2', '3', '4'].indexOf(initialStage) >= 0) showStage(initialStage);
+  if (params.get('view') === 'spec') {
+    var specTab = document.querySelector('.tab[data-view="spec"]');
+    if (specTab) specTab.click();
+  }
+})();
+</script>
+</body>
+</html>

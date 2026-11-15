@@ -30,9 +30,10 @@
  *
  * @module dsh-project-autotest
  */
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { constants as FS_CONSTANTS } from 'node:fs'
+import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { API_PREFIX, createProject, deriveStageStatus, normalizeProject, STEP_IDS, type ExportFormat, type ProjectSnapshot, type WorkspaceSummary } from './wire.ts'
+import { API_PREFIX, createProject, deriveStageStatus, normalizeProject, STEP_IDS, type ExportFormat, type ProjectSnapshot, type StorageInfo, type WorkspaceSummary } from './wire.ts'
 import { renderExport } from './export.ts'
 import { renderReport } from './report.ts'
 import { importCases, ImportError, type ImportedCase, type ImportResult } from './importers.ts'
@@ -237,6 +238,57 @@ export function autotestDir(workspacePath: string): string {
 }
 
 /**
+ * Where one workspace's storage choice is remembered.
+ *
+ * Kept in the workspace (not in `$DSH_HOME`) so the setting travels with the
+ * project: cloning the repository keeps the team on the same location, and a
+ * workspace that was never configured simply has no file.
+ * @param workspacePath - the workspace's absolute directory.
+ */
+function storageSettingFile(workspacePath: string): string {
+  return join(workspacePath, '.dsh-autotest-storage.json')
+}
+
+/**
+ * The effective storage directory for one workspace.
+ *
+ * Resolution order: the workspace's saved choice, then the default. A saved
+ * value that is not an absolute path is ignored rather than trusted — the page
+ * validates it too, but the Host is the one that writes files.
+ * @param workspacePath - the workspace's absolute directory.
+ * @returns the directory and how it was chosen.
+ * @throws when `workspacePath` is relative (a path we cannot anchor).
+ */
+export async function resolveStorage(workspacePath: string): Promise<StorageInfo> {
+  if (!isAbsolute(workspacePath)) throw new Error('workspace path must be absolute')
+  const defaultDir = autotestDir(workspacePath)
+  try {
+    const text = await readFile(storageSettingFile(workspacePath), 'utf8')
+    const saved = (JSON.parse(text) as { dir?: unknown }).dir
+    if (typeof saved === 'string' && saved.trim() !== '' && isAbsolute(saved.trim())) {
+      return { kind: 'custom', dir: saved.trim(), defaultDir }
+    }
+  } catch {
+    // No setting, or an unreadable one: the default applies.
+  }
+  return { kind: 'default', dir: defaultDir, defaultDir }
+}
+
+/**
+ * Persist or clear one workspace's storage choice.
+ * @param workspacePath - the workspace's absolute directory.
+ * @param dir - an absolute directory, or `null` to return to the default.
+ */
+async function writeStorageSetting(workspacePath: string, dir: string | null): Promise<void> {
+  const file = storageSettingFile(workspacePath)
+  if (dir === null) {
+    await rm(file, { force: true })
+    return
+  }
+  await writeFile(file, `${JSON.stringify({ version: 1, dir }, null, 2)}\n`, 'utf8')
+}
+
+/**
  * The project document's path.
  *
  * Fixed children only: the directory comes from the registry, never from the
@@ -244,9 +296,9 @@ export function autotestDir(workspacePath: string): string {
  * @param workspacePath - the workspace's absolute directory.
  * @returns the path of `project.json`.
  */
-export function projectFile(workspacePath: string): string {
-  if (!isAbsolute(workspacePath)) throw new Error('workspace path must be absolute')
-  return join(autotestDir(workspacePath), 'project.json')
+export function projectFile(dir: string): string {
+  if (!isAbsolute(dir)) throw new Error('storage directory must be absolute')
+  return join(dir, 'project.json')
 }
 
 /**
@@ -254,9 +306,9 @@ export function projectFile(workspacePath: string): string {
  * @param workspacePath - the workspace's absolute directory.
  * @returns the path of `report.md`.
  */
-export function reportFile(workspacePath: string): string {
-  if (!isAbsolute(workspacePath)) throw new Error('workspace path must be absolute')
-  return join(autotestDir(workspacePath), 'report.md')
+export function reportFile(dir: string): string {
+  if (!isAbsolute(dir)) throw new Error('storage directory must be absolute')
+  return join(dir, 'report.md')
 }
 
 /**
@@ -334,20 +386,22 @@ function registryOf(ctx: HostContext): WorkspaceRegistryService | undefined {
  * @returns the project, its file path, and whether it existed.
  */
 async function loadProject(workspaceId: string, title: string, workspacePath: string): Promise<ProjectSnapshot> {
-  const file = projectFile(workspacePath)
+  const storage = await resolveStorage(workspacePath)
+  const file = projectFile(storage.dir)
   try {
     const text = await readFile(file, 'utf8')
     const project = normalizeProject(JSON.parse(text), workspaceId)
     // The registry is authoritative for a workspace's live title and path.
     if (title !== '') project.title = title
     if (workspacePath !== '') project.path = workspacePath
-    return { project, storagePath: file, existed: true }
+    return { project, storagePath: file, existed: true, storage }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     return {
       project: createProject(workspaceId, title, workspacePath),
       storagePath: file,
       existed: false,
+      storage,
     }
   }
 }
@@ -369,17 +423,21 @@ async function writeAtomic(file: string, content: string): Promise<void> {
  * @returns the project file path.
  */
 async function saveProject(project: ReturnType<typeof normalizeProject>, locale: string): Promise<string> {
-  const dir = autotestDir(project.path)
+  // The document remembers where it lives, so the agent prompt and the report
+  // can name the real location even when the user moved it out of the default.
+  const storage = await resolveStorage(project.path)
+  project.storageDir = storage.dir
+  const dir = storage.dir
   await mkdir(dir, { recursive: true })
-  const file = projectFile(project.path)
+  const file = projectFile(dir)
   // The stage statuses are DERIVED from the work, never taken from the page:
   // whatever a stale document claims is overwritten with the truth before it is
   // written, so the stored document and the report always agree with the cases.
-  const documents = await listInputs(project.path)
+  const documents = await listInputs(dir)
   const statuses = deriveStageStatus(project, { documents: documents.length, hasNote: false })
   for (const id of STEP_IDS) project.steps[id] = { ...project.steps[id], status: statuses[id] }
   await writeAtomic(file, JSON.stringify(project, null, 2))
-  await writeAtomic(reportFile(project.path), renderReport(project, locale, documents.length))
+  await writeAtomic(reportFile(dir), renderReport(project, locale, documents.length))
   return file
 }
 
@@ -390,7 +448,7 @@ async function saveProject(project: ReturnType<typeof normalizeProject>, locale:
  */
 async function hasProject(workspacePath: string): Promise<boolean> {
   try {
-    const info = await stat(projectFile(workspacePath))
+    const info = await stat(projectFile((await resolveStorage(workspacePath)).dir))
     return info.isFile()
   } catch {
     return false
@@ -407,7 +465,7 @@ async function listWorkspaces(ctx: HostContext): Promise<WorkspaceSummary[]> {
     let caseCount = 0
     if (saved) {
       try {
-        const text = await readFile(projectFile(workspace.path), 'utf8')
+        const text = await readFile(projectFile((await resolveStorage(workspace.path)).dir), 'utf8')
         caseCount = normalizeProject(JSON.parse(text), workspace.id).cases.length
       } catch {
         caseCount = 0
@@ -444,6 +502,24 @@ function workspaceFacts(ctx: HostContext, workspaceId: string): { title: string;
   return { title: entity.title, path: entity.path }
 }
 
+/**
+ * Whether a directory can hold this workspace's project.
+ *
+ * A chosen directory must exist and be writable: silently creating a deep tree
+ * from a typo is how plans end up in `~/doc/autotst`. Nothing is written.
+ * @param dir - the absolute directory the user chose.
+ * @returns whether a file can be written there.
+ */
+async function isWritableDirectory(dir: string): Promise<boolean> {
+  try {
+    if (!(await stat(dir)).isDirectory()) return false
+    await access(dir, FS_CONSTANTS.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** The request body shape every method accepts. */
 interface RequestBody {
   workspaceId?: unknown
@@ -460,6 +536,8 @@ interface RequestBody {
   isRequest?: unknown
   /** The conversation the page is showing, for the run route. */
   sessionId?: unknown
+  /** A chosen storage directory, or null/'' to return to the default. */
+  dir?: unknown
 }
 
 /**
@@ -496,8 +574,8 @@ interface DocumentInput {
 }
 
 /** Read every stored document, newest first. */
-async function listInputs(workspacePath: string): Promise<DocumentInput[]> {
-  const dir = join(autotestDir(workspacePath), INPUTS_DIR)
+async function listInputs(storageDir: string): Promise<DocumentInput[]> {
+  const dir = join(storageDir, INPUTS_DIR)
   let names: string[]
   try {
     names = await readdir(dir)
@@ -610,7 +688,7 @@ function runPrompt(project: ReturnType<typeof normalizeProject>, locale: string)
     ? [
       `请执行「${project.title}」的自动化测试（共 ${cases.length} 条用例）。`,
       '',
-      `1. 读取本工作区的测试项目：\`${projectFile(project.path)}\`（用例、前置条件、步骤与预期结果都在里面）。`,
+      `1. 读取本工作区的测试项目：\`${projectFile(project.storageDir ?? project.path)}\`（用例、前置条件、步骤与预期结果都在里面）。`,
       '2. 根据用例编写自动化测试脚本（接口级优先），并实际执行；不要编造结果。',
       '3. 把每条用例的「执行结果」（passed / failed / blocked / untested）与失败归因（product / script / environment）写回：',
       withId
@@ -621,7 +699,7 @@ function runPrompt(project: ReturnType<typeof normalizeProject>, locale: string)
     : [
       `Run the automated tests for "${project.title}" (${cases.length} cases).`,
       '',
-      `1. Read the test project at \`${projectFile(project.path)}\` (cases, preconditions, steps and expected results).`,
+      `1. Read the test project at \`${projectFile(project.storageDir ?? project.path)}\` (cases, preconditions, steps and expected results).`,
       '2. Write the automated scripts (API level first) and actually execute them; never invent results.',
       '3. Write each case\'s result (passed / failed / blocked / untested) and failure cause (product / script / environment) back:',
       withId
@@ -720,10 +798,10 @@ export function createApi(ctx: HostContext) {
         const facts = workspaceFacts(ctx, workspaceId)
         const filename = safeInputName(query.get('filename') ?? 'document.txt')
         const bytes = new TextEncoder().encode(await readBody(request, 8 * 1024 * 1024))
-        const dir = join(autotestDir(facts.path), INPUTS_DIR)
+        const dir = join((await resolveStorage(facts.path)).dir, INPUTS_DIR)
         await mkdir(dir, { recursive: true })
         await writeFile(join(dir, filename), bytes)
-        reply(res, 200, { ok: true, value: { name: filename, size: bytes.length, documents: await listInputs(facts.path) } })
+        reply(res, 200, { ok: true, value: { name: filename, size: bytes.length, documents: await listInputs((await resolveStorage(facts.path)).dir) } })
       } catch (error) {
         const status = typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 400
         fail(res, status, 'bad-request', (error as Error).message)
@@ -809,12 +887,35 @@ export function createApi(ctx: HostContext) {
           reply(res, 200, { ok: true, value: await startRun(ctx, workspaceId, facts, sessionId, locale) })
           return
         }
+        case 'storage': {
+          // Choose where this workspace's project lives: `dir` sets it,
+          // `dir: null` (or an empty string) returns to the default. The path
+          // must be absolute — the Host owns the filesystem, so it refuses to
+          // guess a base directory.
+          const workspaceId = workspaceIdOf(body)
+          const facts = workspaceFacts(ctx, workspaceId)
+          const chosen = body.dir
+          if (chosen !== null && chosen !== undefined && chosen !== '') {
+            if (typeof chosen !== 'string' || !isAbsolute(chosen.trim())) {
+              throw Object.assign(new Error('the storage directory must be an absolute path'), { status: 400 })
+            }
+            if (!(await isWritableDirectory(chosen.trim()))) {
+              throw Object.assign(new Error(`cannot write to "${chosen.trim()}": pick a writable directory`), { status: 400 })
+            }
+            await writeStorageSetting(facts.path, chosen.trim())
+          } else {
+            await writeStorageSetting(facts.path, null)
+          }
+          const storage = await resolveStorage(facts.path)
+          reply(res, 200, { ok: true, value: { storage } })
+          return
+        }
         case 'documents': {
           // The stage-① input. Reading lists what is on disk; nothing is created
           // by looking.
           const workspaceId = workspaceIdOf(body)
           const facts = workspaceFacts(ctx, workspaceId)
-          reply(res, 200, { ok: true, value: { documents: await listInputs(facts.path) } })
+          reply(res, 200, { ok: true, value: { documents: await listInputs((await resolveStorage(facts.path)).dir) } })
           return
         }
         case 'document': {
@@ -836,19 +937,19 @@ export function createApi(ctx: HostContext) {
           } else {
             throw Object.assign(new Error('the upload needs "base64", "text" or isRequest'), { status: 400 })
           }
-          const dir = join(autotestDir(facts.path), INPUTS_DIR)
+          const dir = join((await resolveStorage(facts.path)).dir, INPUTS_DIR)
           await mkdir(dir, { recursive: true })
           const file = join(dir, filename)
           await writeFile(file, bytes)
-          reply(res, 200, { ok: true, value: { name: filename, size: bytes.length, documents: await listInputs(facts.path) } })
+          reply(res, 200, { ok: true, value: { name: filename, size: bytes.length, documents: await listInputs((await resolveStorage(facts.path)).dir) } })
           return
         }
         case 'documentDelete': {
           const workspaceId = workspaceIdOf(body)
           const facts = workspaceFacts(ctx, workspaceId)
           const name = safeInputName(typeof body.filename === 'string' ? body.filename : '')
-          await rm(join(autotestDir(facts.path), INPUTS_DIR, name), { force: true })
-          reply(res, 200, { ok: true, value: { documents: await listInputs(facts.path) } })
+          await rm(join((await resolveStorage(facts.path)).dir, INPUTS_DIR, name), { force: true })
+          reply(res, 200, { ok: true, value: { documents: await listInputs((await resolveStorage(facts.path)).dir) } })
           return
         }
         case 'import': {

@@ -263,3 +263,21 @@ export interface RunStart {
 export function startRun(workspaceId: string, locale: string, sessionId?: string): Promise<RunStart> {
   return call<RunStart>('run', { workspaceId, locale, ...(sessionId === undefined ? {} : { sessionId }) })
 }
+
+/** Where a workspace's project is stored (mirror of the Host's StorageInfo). */
+export interface StorageInfo {
+  kind: 'default' | 'custom'
+  dir: string
+  defaultDir: string
+}
+
+/**
+ * Choose where this workspace's project lives.
+ * @param workspaceId - the workspace.
+ * @param dir - an absolute directory, or null to return to the default.
+ * @returns the resulting storage facts.
+ */
+export async function setStorage(workspaceId: string, dir: string | null): Promise<StorageInfo> {
+  const value = await call<{ storage: StorageInfo }>('storage', { workspaceId, dir })
+  return value.storage
+}

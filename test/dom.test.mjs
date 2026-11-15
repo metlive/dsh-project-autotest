@@ -86,6 +86,7 @@ const stored = new Map([['ws-alpha', structuredClone(BASE)]])
 const requests = []
 const imported = []
 const documents = []
+let storageKind = 'default'
 
 // The route prefix the Host half registers, read from its built bundle: the
 // fixture only answers requests that the shell would actually dispatch to it.
@@ -123,11 +124,11 @@ globalThis.fetch = window.fetch = async (url, init) => {
   if (method === 'project') {
     const project = stored.get(body.workspaceId)
     const fresh = structuredClone(project ?? { ...BASE, workspaceId: body.workspaceId, title: body.workspaceId, path: `/Users/x/projects/${body.workspaceId}`, cases: [], defects: [] })
-    return ok({ project: fresh, storagePath: `/tmp/projects/${body.workspaceId}.json`, existed: project !== undefined })
+    return ok({ project: fresh, storagePath: storageKind === 'custom' ? '/Users/x/team-plans/project.json' : `/tmp/projects/${body.workspaceId}.json`, existed: project !== undefined, storage: { kind: storageKind, dir: storageKind === 'custom' ? '/Users/x/team-plans' : '/Users/x/projects/alpha/docs/autotest', defaultDir: '/Users/x/projects/alpha/docs/autotest' } })
   }
   if (method === 'save') {
     stored.set(body.workspaceId, structuredClone(body.project))
-    return ok({ project: body.project, storagePath: `/tmp/projects/${body.workspaceId}.json`, existed: true })
+    return ok({ project: body.project, storagePath: `/tmp/projects/${body.workspaceId}.json`, existed: true, storage: { kind: storageKind, dir: '/Users/x/projects/alpha/docs/autotest', defaultDir: '/Users/x/projects/alpha/docs/autotest' } })
   }
   if (method === 'export') {
     return ok({ artifact: { filename: `alpha-${body.format}.xmind`, mime: 'application/x', base64: 'UEsDBAo=' } })
@@ -146,6 +147,10 @@ globalThis.fetch = window.fetch = async (url, init) => {
   }
   if (method === 'version') {
     return ok({ build: 'test' })
+  }
+  if (method === 'storage') {
+    storageKind = body.dir === null || body.dir === '' ? 'default' : 'custom'
+    return ok({ storage: { kind: storageKind, dir: body.dir ?? '/Users/x/projects/alpha/docs/autotest', defaultDir: '/Users/x/projects/alpha/docs/autotest' } })
   }
   if (method === 'run') {
     return ok({ sessionId: 'session-live', cases: stored.get(body.workspaceId)?.cases.length ?? 0, prompt: 'Run the automated tests' })
@@ -557,6 +562,33 @@ check('the started run is reported with its session', $('[data-run-session="sess
 check('the page shows the task the model received', $('.dpat-runPrompt .dpat-pre')?.textContent.includes('Run the automated tests'))
 check('a notice confirms how many cases went out', text().includes('wb.runStarted'))
 check('the button returns to its idle label after starting', $('[data-action="run-tests"]').textContent.includes('wb.runStart'))
+
+
+currentStage = '11. Storage location settings'
+// --- 11. Storage settings -------------------------------------------------
+const storageBtn = $('[data-action="storage-settings"]')
+check('the storage path row offers a settings button', storageBtn !== null)
+check('the default location is shown', text().includes('/tmp/projects/ws-alpha.json'))
+check('no "custom" badge while on the default', $('.dpat-storageBadge') === null)
+await click(storageBtn)
+check('the settings panel opens with the current dir', $('[data-storage-panel="open"]') !== null && $('[data-storage-panel="open"] input').value.length > 0)
+const dirInput = $('[data-storage-panel="open"] input')
+await type(dirInput, '/Users/x/team-plans')
+await settle()
+await click($('[data-storage-action="apply"]'))
+await settle()
+const storageRequest = requests.filter((entry) => entry.method === 'storage').pop()
+check('applying sends the chosen directory to the Host', storageRequest?.body.dir === '/Users/x/team-plans')
+check('the page then re-reads the project from that location', text().includes('/Users/x/team-plans/project.json'))
+check('a custom location is badged', $('.dpat-storageBadge') !== null)
+
+// Restore default.
+await click($('[data-action="storage-settings"]'))
+await click($('[data-storage-action="reset"]'))
+await settle()
+const resetRequest = requests.filter((entry) => entry.method === 'storage').pop()
+check('reset asks the Host to go back to the default', resetRequest?.body.dir === null)
+check('the badge disappears after reset', $('.dpat-storageBadge') === null)
 
 // --- Teardown -------------------------------------------------------------
 await act(async () => { root.unmount() })

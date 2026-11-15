@@ -242,7 +242,7 @@ test('single-flow stages span the full width so they align with their heading', 
     assert.ok(grid[0].includes(selector), `${selector} must span the stage width`)
   }
   // And the editor keeps a readable measure instead of stretching to the window.
-  assert.match(styles, /\.dpat-caseList \{[^}]*max-width: 1100px/, 'case cards keep a readable width')
+  assert.match(styles, /\.dpat-caseList \{[^}]*max-width: 1120px/, 'case cards keep a readable width')
 })
 
 test('the layout leaves the stage body uncapped and widens the rail', () => {
@@ -252,7 +252,7 @@ test('the layout leaves the stage body uncapped and widens the rail', () => {
   // pinned here so a later edit cannot quietly restore the 900px cap.
   const styles = readFileSync(join(ROOT, 'src', 'client', 'styles.ts'), 'utf8')
   assert.doesNotMatch(styles, /max-width:\s*900px/, 'the stage body must not be capped at 900px')
-  assert.match(styles, /minmax\(0, 260px\)/, 'the left rail is 260px (was 210)')
+  assert.match(styles, /minmax\(0, 268px\)/, 'the left rail is 268px (was 210, then 260)')
   const content = readFileSync(join(ROOT, 'src', 'client', 'content.ts'), 'utf8')
   assert.match(content, /export function contentFor\(localeId: string\): FlowContent/, 'contentFor stays typed and exported')
   assert.match(content, /const CONTENT_BY_LOCALE/, 'its lookup table stays present')

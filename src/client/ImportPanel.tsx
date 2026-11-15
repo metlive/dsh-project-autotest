@@ -18,6 +18,7 @@ import {
   type ReactNode,
 } from 'react'
 import { importPreview, type ImportPreview } from './api.ts'
+import { ButtonIcon } from './ButtonIcon.tsx'
 import type { Translate } from './locales.ts'
 
 /** How confirmed cases join the project. */
@@ -180,7 +181,8 @@ export function ImportPanel(props: ImportPanelProps): ReactNode {
                 'data-import-mode': 'append',
                 onClick: () => props.onApply(preview, 'append'),
               },
-              t('wb.importAppend'),
+              h(ButtonIcon, { name: 'add' }),
+              h('span', null, t('wb.importAppend')),
             ),
             h(
               'button',
@@ -190,7 +192,8 @@ export function ImportPanel(props: ImportPanelProps): ReactNode {
                 'data-import-mode': 'replace',
                 onClick: () => props.onApply(preview, 'replace'),
               },
-              t('wb.importReplace'),
+              h(ButtonIcon, { name: 'reset' }),
+              h('span', null, t('wb.importReplace')),
             ),
           ),
         ),

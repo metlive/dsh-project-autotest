@@ -143,6 +143,14 @@ export interface ProjectState {
   title: string
   /** Absolute workspace path, for display and exports. */
   path: string
+  /**
+   * Absolute directory this document was saved in, when it has been saved.
+   *
+   * Normally `<path>/docs/autotest`, but the user may have chosen another
+   * location; the document carries it so the agent prompt and the report name
+   * the real file instead of guessing.
+   */
+  storageDir?: string
   /** The coverage target the analysis stage committed to, in percent. */
   coverageTarget: number
   /** The automation granularity: API-only, UI-only, or both. */
@@ -163,10 +171,29 @@ export interface ProjectState {
 export interface ProjectSnapshot {
   /** The project. A fresh one is created on first read, never persisted empty. */
   project: ProjectState
-  /** Absolute directory of the persisted JSON, for display. */
+  /** Absolute path of the persisted JSON, for display. */
   storagePath: string
   /** Whether the project existed on disk before this read. */
   existed: boolean
+  /** Whether the location is the default (`<workspace>/docs/autotest`) or chosen by the user. */
+  storage: StorageInfo
+}
+
+/**
+ * Where one workspace's test project is stored.
+ *
+ * The DEFAULT is inside the workspace (`<workspace>/docs/autotest/`), because a
+ * test plan is project documentation. A team whose workpaces are read-only, or
+ * who keep all plans in one place, can point it elsewhere — the choice is
+ * remembered per workspace and never invented by the page.
+ */
+export interface StorageInfo {
+  /** `default` for `<workspace>/docs/autotest`, `custom` when the user chose one. */
+  kind: 'default' | 'custom'
+  /** Absolute directory the project lives in. */
+  dir: string
+  /** The directory the default setting would use, shown so "reset" is concrete. */
+  defaultDir: string
 }
 
 /** One workspace entry the page's picker lists. */
@@ -311,6 +338,7 @@ export function normalizeProject(raw: unknown, workspaceId: string): ProjectStat
   const project = base
   if (typeof source.title === 'string') project.title = source.title
   if (typeof source.path === 'string') project.path = source.path
+  if (typeof source.storageDir === 'string' && isAbsolutePath(source.storageDir)) project.storageDir = source.storageDir
   if (typeof source.coverageTarget === 'number' && Number.isFinite(source.coverageTarget)) {
     project.coverageTarget = Math.max(0, Math.min(100, Math.round(source.coverageTarget)))
   }
@@ -434,6 +462,11 @@ export function deriveStageStatus(project: ProjectState, requirements?: Requirem
       ? 'done'
       : 'doing'
   return status
+}
+
+/** Whether a string is an absolute path on this platform (POSIX or Windows). */
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
 /** A one-line summary of where a project stands, used by the picker and header. */
